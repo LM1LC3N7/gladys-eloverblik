@@ -15,8 +15,8 @@
       (Swagger), or a 200 with `errorCode` 50001 (handled as a refusal too).
 - [ ] The name of the portal menu where the token is created (docs say "Data
       sharing" / _Datadeling_).
-- [ ] `Quarter` on a meter read hourly: refused with 30008 (assumed, then
-      `Hour` is used), or hours given as PT1H (handled too).
+- [ ] `Quarter` on a meter read hourly: refused (any 400 or a 30008 in the
+      result: `Hour` is then used), or hours given as PT1H (handled too).
 - [ ] `consumerStartDate` format (a date or a date-time, both read) and the
       answer for a period before it (30018 assumed, from the Swagger).
 - [ ] `timeInterval.start/end` in UTC with `Z` (Swagger); one period per local
@@ -53,7 +53,7 @@
   gladys-myelectricaldata).
 - **Tokens**: the user's token never leaves memory; the data access token is
   kept 20 h (valid 24 h) in memory only; two GetToken at least 5 minutes apart,
-  a restart included (time in /data). Refusal only from GetToken (a JSON 401 or
+  a restart included (time in /data). Refusal only from GetToken (a 401 or
   403, codes 50000/50001), kept as 8 bits of a salted hash, lifted by a new
   token or a Test that succeeds. A 401/403 page of a proxy is
   `token_unauthorized_page` (passing). A 401/403 of a data route drops the access token only.
@@ -63,12 +63,20 @@
   day at most counted in /data before each request. 429 and 5xx (503 "DataHub
   unavailable") pause everything: Retry-After, else 15 min doubled up to 6 h,
   at least 1 min.
-- **Window and errors** (review r1): never before `consumerStartDate`; a point
-  answered 30018/30010 asked again alone from the middle of the gap to
-  yesterday (3 times at most a read, the start that worked kept in memory); a
-  point in error or without data (30015) asked again the next day only.
-- **Aggregation** (review r1): `Quarter` first, `Hour` after a 30008/30011
-  (in memory, until a restart).
+- **Window and errors** (reviews r1, r2): never before `consumerStartDate`;
+  one request per distinct start (a recent point never fails the others); a
+  point answered 30018/30010 gets its first accepted day searched alone by
+  halves down to the day (8 requests a read at most for all points, a search
+  cut there goes on at the next read, the start found kept in memory); the
+  answers in hand are published before the searches; a point the API answers
+  in error or without data (30015) is asked again the next day only, a
+  failure of Gladys to take the consumption at the next read.
+- **Refusal** (review r2): a 401/403 of GetToken with an empty body, a JSON
+  body or a `WWW-Authenticate: Bearer` challenge; only a non-empty page that
+  is not JSON is passing.
+- **Aggregation** (reviews r1, r2): `Quarter` first; any 400 of a `Quarter`
+  request, or a result error that is not one of a metering point, switches to
+  `Hour` (in memory, until a restart).
 - **Days**: 31 days at the first read, 92 at most after a stop, the last 3
   complete days read again; a day with a missing half hour is asked again for
   10 days, then given up. A metering point answered with an error code keeps

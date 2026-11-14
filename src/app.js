@@ -86,8 +86,19 @@ const ID_KEY = /^[0-9a-f]{64}$/;
 const PAUSING = new Set(['rate_limited', 'server']);
 /** Per metering point: asked before its registration (30018) or its authorization (30010). */
 const LATER_START = new Set(['E30018', 'E30010']);
-/** The aggregation refused (30008 unavailable, 30011 not valid). */
-const AGGREGATION_REFUSED = new Set([30008, 30011]);
+/** Requests a read may spend searching the first accepted day of new points. */
+const SEARCH_BUDGET = 8;
+/** Result errors that belong to one metering point (not to the aggregation asked). */
+const POINT_ERRORS = new Set([
+  ...Array.from({ length: 14 }, (_, i) => `E${20000 + i}`),
+  'E30010',
+  'E30015',
+  'E30016',
+  'E30018',
+  'E40014',
+]);
+const pointError = (problem) =>
+  problem === undefined || POINT_ERRORS.has(problem) || !/^E\d+$/.test(problem);
 
 /** The local date halfway between two local dates (rounded up). */
 function midDate(from, to) {
@@ -222,6 +233,8 @@ export class EloverblikApp {
     /** Per metering point key, in memory: the day it ended in error, the start DataHub took. */
     this.errorDays = new Map();
     this.floors = new Map();
+    /** A search of the first accepted day cut by the budget: { lo, hi } per key. */
+    this.searches = new Map();
     /** `Quarter` first (the 15-minute meters); `Hour` once DataHub refuses it. */
     this.aggregation = 'Quarter';
 
@@ -332,6 +345,7 @@ export class EloverblikApp {
         this.problems.clear();
         this.errorDays.clear();
         this.floors.clear();
+        this.searches.clear();
         this.roundProblem = undefined;
         this.roundOk = undefined;
         this.lastDiscovery = undefined;
@@ -832,8 +846,8 @@ export class EloverblikApp {
   static refusal(err) {
     if (err?.code === 'refused') return true;
     if (err?.code !== 'unauthorized') return false;
-    // A 401 or 403 is one only when the API itself answered it (its JSON
-    // ProblemDetails), never a page of a proxy or a gateway in front of it.
+    // A 401 or 403 is one only when the API itself answered it (empty body,
+    // JSON or a Bearer challenge), never a page of a proxy in front of it.
     return Boolean(err.fromApi);
   }
 
@@ -942,20 +956,20 @@ export class EloverblikApp {
     return { start, end: today };
   }
 
-  /** One gettimeseries request; falls back to `Hour` once when `Quarter` is refused. */
+  /**
+   * One gettimeseries request. Asked as `Quarter`: any 400 of the request,
+   * or a result error that is not one of a metering point, means DataHub
+   * does not take that aggregation: asked again as `Hour`, kept for good.
+   */
   async seriesRequest(gen, meters, from, today) {
     const ids = meters.map((m) => m.id);
-    for (let attempt = 0; ; attempt += 1) {
+    for (;;) {
+      const quarter = this.aggregation !== 'Hour';
       let body;
       try {
         body = await this.dataRequest(gen, routes.timeSeries(ids, from, today, this.aggregation));
       } catch (err) {
-        if (
-          attempt === 0 &&
-          this.aggregation !== 'Hour' &&
-          codeOf(err) === 'invalid' &&
-          AGGREGATION_REFUSED.has(err.apiCode)
-        ) {
+        if (quarter && codeOf(err) === 'invalid') {
           this.aggregation = 'Hour';
           continue;
         }
@@ -968,10 +982,7 @@ export class EloverblikApp {
       if (this.gone(gen)) throw new EloverblikError('stopped');
       const series = parseTimeSeries(body, ids);
       if (!series) throw new EloverblikError('bad_response');
-      const refusedAggregation = [...series.values()].some((r) =>
-        AGGREGATION_REFUSED.has(Number(r.problem?.slice(1))),
-      );
-      if (attempt === 0 && this.aggregation !== 'Hour' && refusedAggregation) {
+      if (quarter && [...series.values()].some((r) => !pointError(r.problem))) {
         this.aggregation = 'Hour';
         continue;
       }
@@ -979,7 +990,13 @@ export class EloverblikApp {
     }
   }
 
-  /** One request for every created metering point still missing a day. */
+  /**
+   * The created metering points still missing a day: one request per
+   * distinct start (a recent point is never asked from an older start than
+   * its own), the answers in hand published first; then, for a point asked
+   * before its registration (30018) or its authorization (30010), a search
+   * of its first accepted day, alone, by halves, within a budget per read.
+   */
   async readSeries(gen, today) {
     const created = new Set(this.createdKeys());
     const wanted = this.meters.filter((m) => created.has(m.key) && this.needs(m.key, today));
@@ -992,29 +1009,85 @@ export class EloverblikApp {
     const windows = new Map(wanted.map((m) => [m.key, this.windowOf(m, today)]));
     const asked = wanted.filter((m) => windows.get(m.key).start < today);
     if (!asked.length) return;
-    const from = asked.map((m) => windows.get(m.key).start).sort()[0];
-    const series = await this.seriesRequest(gen, asked, from, today);
-    for (const meter of asked) {
-      if (this.gone(gen)) throw new EloverblikError('stopped');
-      let window = windows.get(meter.key);
-      let result = series.get(meter.id);
-      // Asked before its registration in DataHub (30018) or before the
-      // authorization (30010): asked again alone, from a later day, halving
-      // the gap to yesterday each time (3 times at most in a read).
-      const yesterday = shiftDate(today, -1);
-      for (
-        let n = 0;
-        n < 3 && LATER_START.has(result?.problem) && window.start < yesterday;
-        n += 1
-      ) {
-        const start = midDate(window.start, yesterday);
-        window = { start, end: today };
-        const again = await this.seriesRequest(gen, [meter], start, today);
-        result = again.get(meter.id);
-        if (result && !result.problem) this.floors.set(meter.key, start);
-      }
-      await this.publishMeter(gen, meter, result, window, today);
+    const groups = new Map();
+    for (const m of asked) {
+      const start = windows.get(m.key).start;
+      groups.set(start, [...(groups.get(start) ?? []), m]);
     }
+    // Each answer is published as it comes (a later error leaves it published).
+    const later = [];
+    for (const [start, meters] of [...groups.entries()].sort((x, y) => (x[0] < y[0] ? -1 : 1))) {
+      if (this.gone(gen)) throw new EloverblikError('stopped');
+      const series = await this.seriesRequest(gen, meters, start, today);
+      for (const meter of meters) {
+        const result = series.get(meter.id);
+        if (LATER_START.has(result?.problem)) later.push(meter);
+        else await this.publishMeter(gen, meter, result, windows.get(meter.key), today);
+      }
+    }
+    let budget = SEARCH_BUDGET;
+    for (const meter of later) {
+      if (this.gone(gen)) throw new EloverblikError('stopped');
+      budget = await this.searchStart(gen, meter, windows.get(meter.key), today, budget);
+    }
+  }
+
+  /**
+   * The first day DataHub accepts for a metering point: between the start
+   * refused and today, by halves, down to the day (no day lost). Once found,
+   * its answer is published from that day, kept as the point's floor; a
+   * search cut by the budget publishes nothing and goes on at the next read.
+   * Returns the budget left.
+   */
+  async searchStart(gen, meter, window, today, budget) {
+    const kept = this.searches.get(meter.key);
+    let lo = kept && kept.lo > window.start ? kept.lo : window.start;
+    let hi = kept?.hi;
+    let best;
+    let problem = 'E30018';
+    while (budget > 0) {
+      const mid = midDate(lo, hi ?? today);
+      if (mid <= lo || mid >= (hi ?? today)) break;
+      budget -= 1;
+      let series;
+      try {
+        series = await this.seriesRequest(gen, [meter], mid, today);
+      } catch (err) {
+        this.searches.set(meter.key, { lo, hi });
+        throw err;
+      }
+      const result = series.get(meter.id);
+      if (LATER_START.has(result?.problem)) {
+        lo = mid;
+        problem = result.problem;
+      } else {
+        hi = mid;
+        best = { result, window: { start: mid, end: today } };
+      }
+    }
+    // A search taken up from a previous read: its accepted start asked again.
+    if (!best && hi !== undefined && budget > 0) {
+      budget -= 1;
+      const series = await this.seriesRequest(gen, [meter], hi, today);
+      const result = series.get(meter.id);
+      if (LATER_START.has(result?.problem)) hi = undefined;
+      else best = { result, window: { start: hi, end: today } };
+    }
+    const done = hi !== undefined && midDate(lo, hi) >= hi;
+    if (done || (!best && budget > 0)) this.searches.delete(meter.key);
+    else this.searches.set(meter.key, { lo, hi });
+    if (best && done) {
+      this.floors.set(meter.key, hi);
+      await this.publishMeter(gen, meter, best.result, best.window, today);
+    } else if (!best && hi === undefined && budget > 0) {
+      // Refused up to yesterday: asked again tomorrow.
+      await this.publishMeter(gen, meter, { slots: new Map(), problem }, window, today);
+    } else {
+      // Cut by the budget: nothing published from a start that may not be
+      // the first one (a day would be lost); the search goes on next read.
+      this.problems.set(meter.key, ['start_search']);
+    }
+    return budget;
   }
 
   /** The half hours of one metering point published; its mark moved over the complete days. */
@@ -1067,8 +1140,10 @@ export class EloverblikApp {
       }
     }
     if (problems.length) {
-      // A metering point in error, or without data: read again tomorrow only.
-      this.errorDays.set(meter.key, today);
+      // A metering point the API answered in error, or without data: read
+      // again tomorrow only (a failure of Gladys is retried at the next read).
+      if (!result || result.problem) this.errorDays.set(meter.key, today);
+      else this.errorDays.delete(meter.key);
       this.problems.set(meter.key, problems.slice(0, 3));
       if (result?.problem) this.log.warn(`Metering point …${meter.suffix}: ${result.problem}`);
     } else {

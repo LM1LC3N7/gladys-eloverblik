@@ -61,8 +61,11 @@ jeton d'accès et liste vos points (au plus une fois par minute).
   jour où le point de comptage est devenu le vôtre (`consumerStartDate`
   d'Eloverblik). Si DataHub répond que la période commence avant son
   enregistrement (30018) ou avant l'autorisation (30010), ce point est
-  redemandé seul à partir d'un jour plus récent (en coupant en deux l'écart
-  jusqu'à hier, 3 fois au plus par lecture). Après un arrêt,
+  le premier jour accepté de ce point est cherché seul, en coupant l'écart en
+  deux jusqu'au jour près (aucun jour perdu), 8 requêtes au plus par lecture
+  pour tous les points ; une recherche coupée ne publie rien encore (statut `start_search`) et reprend à la lecture suivante.
+  Chaque début distinct a sa propre requête : un point récent ne fait jamais
+  échouer les autres. Après un arrêt,
   elle rattrape au plus 92 jours. Les 3 derniers jours complets sont relus avec
   les suivants : une valeur estimée remplacée par une mesure est corrigée.
 - L'intégration demande des **quarts d'heure** et les additionne deux à deux
@@ -100,9 +103,10 @@ minute et par IP).
   6 heures, ou le `Retry-After` de la réponse s'il est plus long (6 heures au
   plus). La pause
   survit à un redémarrage.
-- **Jeton refusé** (la demande de jeton reçoit un 401 ou 403 de l'API
-  elle-même, ou l'un de ses codes d'erreur 50000 / 50001 ; une page d'un
-  proxy n'est pas un refus) : plus rien n'est demandé ; le statut le dit. Enregistrez un
+- **Jeton refusé** (la demande de jeton reçoit un 401 ou 403 au corps vide,
+  au corps JSON ou avec un en-tête `WWW-Authenticate: Bearer`, ou l'un des
+  codes d'erreur 50000 / 50001 ; une page HTML non vide d'un proxy n'est pas
+  un refus) : plus rien n'est demandé ; le statut le dit. Enregistrez un
   nouveau jeton, ou appuyez sur Tester quand le jeton fonctionne à nouveau.
 - Un 401 ou 403 sur une route de **données** n'est pas un refus de votre
   jeton : le jeton d'accès est oublié et un nouveau est demandé à la lecture

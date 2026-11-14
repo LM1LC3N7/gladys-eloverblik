@@ -17,7 +17,7 @@ the notes of the version's GitHub Release.
   on eloverblik.dk, read-only.
 - One device per consumption metering point (type E17, 10 at most), offered in
   Discovery, named by the last 4 digits of its id only.
-- The hourly consumption published after the fact into the energy monitoring
+- The consumption published after the fact into the energy monitoring
   (`publishEnergyConsumption`, quarter hours added two by two, or each hour in
   two half hours when DataHub refuses quarter hours), 31 days back at the
   first read but never before the day the metering point became the user's

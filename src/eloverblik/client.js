@@ -139,8 +139,11 @@ export async function send({
   }
   if (status === 401 || status === 403) {
     const err = new EloverblikError('unauthorized', { status, apiCode: apiCodeOf(text) });
-    // An answer of the API itself (JSON), not a page of a proxy in front of it.
-    err.fromApi = isJson(text);
+    // An answer of the API itself: an empty body (a bearer middleware), a
+    // JSON ProblemDetails, or a `WWW-Authenticate: Bearer` challenge. Only a
+    // non-empty page that is not JSON (HTML of a proxy) is not one.
+    const challenge = /^\s*Bearer\b/i.test(response.headers?.get?.('www-authenticate') ?? '');
+    err.fromApi = challenge || text.trim() === '' || isJson(text);
     throw err;
   }
   if (status === 400) throw new EloverblikError('invalid', { status, apiCode: apiCodeOf(text) });

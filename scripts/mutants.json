@@ -376,5 +376,83 @@
     "file": "src/app.js",
     "from": "this.enteredToken !== undefined && config.token !== '' && config.token !== this.enteredToken;",
     "to": "this.token !== undefined && config.token !== this.token;"
+  },
+  {
+    "name": "r2 N14 token date after the meters in the status",
+    "file": "src/app.js",
+    "from": "    const expiry = tokenExpiry(this.config.token);\n    if (expiry !== undefined) add('tokenUntil', { date: dmy(localDate(expiry)) });\n    if (this.listDate",
+    "to": "    if (this.listDate"
+  },
+  {
+    "name": "r2 N15 startDate parsed from a date-time ignored",
+    "file": "src/eloverblik/model.js",
+    "from": "  const at = instant(text);\n  return at === undefined ? undefined : localDate(at);",
+    "to": "  return undefined;"
+  },
+  {
+    "name": "empty 401 of GetToken not a refusal",
+    "file": "src/eloverblik/client.js",
+    "from": "err.fromApi = challenge || text.trim() === '' || isJson(text);",
+    "to": "err.fromApi = isJson(text);"
+  },
+  {
+    "name": "Bearer challenge ignored",
+    "file": "src/eloverblik/client.js",
+    "from": "err.fromApi = challenge || text.trim() === '' || isJson(text);",
+    "to": "err.fromApi = text.trim() === '' || isJson(text);"
+  },
+  {
+    "name": "HTML page of a proxy taken as a refusal",
+    "file": "src/eloverblik/client.js",
+    "from": "err.fromApi = challenge || text.trim() === '' || isJson(text);",
+    "to": "err.fromApi = true;"
+  },
+  {
+    "name": "no Hour fallback on any 400 of Quarter",
+    "file": "src/app.js",
+    "from": "        if (quarter && codeOf(err) === 'invalid') {\n          this.aggregation = 'Hour';",
+    "to": "        if (quarter && codeOf(err) === 'invalid' && err.apiCode === 30008) {\n          this.aggregation = 'Hour';"
+  },
+  {
+    "name": "no Hour fallback on a result error",
+    "file": "src/app.js",
+    "from": "      if (quarter && [...series.values()].some((r) => !pointError(r.problem))) {",
+    "to": "      if (false) {"
+  },
+  {
+    "name": "one request for all starts",
+    "file": "src/app.js",
+    "from": "      const start = windows.get(m.key).start;\n      groups.set(start,",
+    "to": "      const start = asked.map((x) => windows.get(x.key).start).sort()[0];\n      groups.set(start,"
+  },
+  {
+    "name": "no search budget",
+    "file": "src/app.js",
+    "from": "    while (budget > 0) {",
+    "to": "    while (true) {"
+  },
+  {
+    "name": "search stops at the first accepted day",
+    "file": "src/app.js",
+    "from": "        hi = mid;\n        best = { result, window: { start: mid, end: today } };",
+    "to": "        hi = mid;\n        best = { result, window: { start: mid, end: today } };\n        break;"
+  },
+  {
+    "name": "floor found not kept",
+    "file": "src/app.js",
+    "from": "      this.floors.set(meter.key, hi);\n",
+    "to": ""
+  },
+  {
+    "name": "a Gladys failure delays a day",
+    "file": "src/app.js",
+    "from": "      if (!result || result.problem) this.errorDays.set(meter.key, today);",
+    "to": "      this.errorDays.set(meter.key, today);"
+  },
+  {
+    "name": "a search cut by the budget publishes its best start",
+    "file": "src/app.js",
+    "from": "    if (best && done) {\n      this.floors.set(meter.key, hi);",
+    "to": "    if (best) {\n      this.floors.set(meter.key, hi);"
   }
 ]

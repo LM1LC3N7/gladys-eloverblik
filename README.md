@@ -4,9 +4,10 @@ Unofficial [Gladys Assistant](https://gladysassistant.com) integration for the
 Danish electricity meters, through the **official customer API of
 [Eloverblik](https://eloverblik.dk/)** (Energinet DataHub). Not affiliated with
 Energinet nor with Eloverblik. With the token you create on eloverblik.dk, it
-reads the hourly consumption of each consumption metering point you create in
-Discovery and publishes it after the fact into the energy monitoring of Gladys
-(each hour in two half hours): Eloverblik serves the data one or two days late.
+reads the consumption of each consumption metering point you create in
+Discovery (quarter hours added two by two, or each hour in two half hours when
+DataHub only gives hours) and publishes it after the fact into the energy
+monitoring of Gladys: Eloverblik serves the data one or two days late.
 
 **Read-only**, one read a day (4 scheduled reads at most while yesterday is
 incomplete, plus a read a minute after a new device, token or Test), at most

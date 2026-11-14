@@ -58,8 +58,10 @@ access token and lists your points (at most once a minute).
 - At the first read, it takes **31 days** back, never before the day the
   metering point became yours (`consumerStartDate` of Eloverblik). If DataHub
   answers that the period starts before its registration (30018) or before
-  the authorization (30010), that point is asked again alone, from a later day
-  (halving the gap to yesterday, 3 times at most in a read). After a stop, it catches up at
+  the authorization (30010), that point's first accepted day is searched alone,
+  by halves down to the day (no day lost), 8 requests at most per read for all
+  the points; a search cut there publishes nothing yet (status `start_search`) and goes on at the next read. Each distinct start
+  is asked in its own request, so a recent point never makes the others fail. After a stop, it catches up at
   most 92 days back. The last 3 complete days are read again with the next
   days: an estimated value replaced by a measured one is corrected.
 - The integration asks for **quarter hours** and adds them two by two (the
@@ -91,8 +93,9 @@ is 2 a minute per IP).
 - **429 (too many requests)** or **503 (DataHub unavailable)** and other 5xx:
   every request pauses: 15 minutes, doubled each time up to 6 hours, or the
   `Retry-After` of the answer when it is longer (6 hours at most). The pause survives a restart.
-- **Refused token** (the token request answers a 401 or 403 of the API
-  itself, or one of its error codes 50000 / 50001; a page of a proxy is not a
+- **Refused token** (the token request answers a 401 or 403 with an empty
+  body, a JSON body or a `WWW-Authenticate: Bearer` header, or one of the
+  error codes 50000 / 50001; a non-empty HTML page of a proxy is not a
   refusal): nothing is asked any more; the status says so. Save a new token,
   or press Test once the token works again.
 - A 401 or 403 on a **data** route is not a refusal of your token: the access

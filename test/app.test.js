@@ -650,32 +650,6 @@ test('a metering point taken over recently: asked from that day only', async (t)
   assert.equal(env.store.data.published[KEY], '2026-11-10');
 });
 
-test('30018 (before its registration): asked again alone from a later day, published at once', async (t) => {
-  const REG = '2026-11-05';
-  const api = createApi({
-    list: () => E.meteringPoints([E.MP, E.MP2]),
-    series: ({ ids, from, to }) => {
-      const out = { result: [] };
-      if (ids.includes(E.MP)) out.result.push(...E.timeSeries({ ids: [E.MP], from, to }).result);
-      if (ids.includes(E.MP2)) {
-        out.result.push(
-          from < REG ? E.failed(E.MP2, 30018) : E.timeSeries({ ids: [E.MP2], from, to }).result[0],
-        );
-      }
-      return out;
-    },
-  });
-  const env = await ready({ api });
-  t.after(() => env.app.stop());
-  const series = env.api.calls.filter((c) => c.op === 'series');
-  assert.deepEqual(series[0].ids, [E.MP, E.MP2]);
-  assert.ok(series.length <= 4, `${series.length} series requests`);
-  assert.ok(series.slice(1).every((c) => c.ids.length === 1 && c.ids[0] === E.MP2));
-  assert.ok(slotsOf(env, F(KEY2)).length > 0);
-  assert.equal(env.store.data.published[KEY2], '2026-11-10');
-  assert.equal(env.store.data.published[KEY], '2026-11-10');
-});
-
 test('a metering point without data (30015) is read again once a day only', async (t) => {
   const api = createApi({
     series: ({ ids }) => ({ result: ids.map((id) => E.failed(id, 30015)) }),
@@ -752,4 +726,185 @@ test('restarted with a malformed token, then a new one: the refusal kept in /dat
   await env.wait(10 * MINUTE);
   assert.deepEqual(env.api.ops(), ['token', 'list']);
   assert.equal(store.data.refused, null);
+});
+
+// --- Review r2 -----------------------------------------------------------------------
+
+/** An API where some points answer 30018 while dateFrom is before their registration. */
+function registered(reg, { ids = [E.MP, E.MP2], start = {}, value } = {}) {
+  return createApi({
+    list: () => E.meteringPoints(ids, { starts: start }),
+    series: ({ ids: asked, from, to }) => ({
+      result: asked.map((id) =>
+        reg[id] && from < reg[id]
+          ? E.failed(id, 30018, 'MeteringPointDataNotAvailableForTheRequestedPeriod')
+          : E.timeSeries({ ids: [id], from, to, ...(value ? { value } : {}) }).result[0],
+      ),
+    }),
+  });
+}
+
+const firstSlot = (env, key) =>
+  Math.min(...slotsOf(env, F(key)).map((x) => Date.parse(x.starts_at)));
+
+test('30018 without consumerStartDate: the first accepted day found by halves, no day lost', async (t) => {
+  const api = registered({ [E.MP2]: '2026-11-05' });
+  const env = await ready({ api });
+  t.after(() => env.app.stop());
+  const series = env.api.calls.filter((c) => c.op === 'series');
+  assert.deepEqual(series[0].ids, [E.MP, E.MP2]);
+  assert.ok(series.slice(1).every((c) => c.ids.length === 1 && c.ids[0] === E.MP2));
+  assert.ok(series.length - 1 <= 8, `${series.length - 1} searches`);
+  assert.equal(firstSlot(env, KEY2), parseLocalDate('2026-11-05'));
+  assert.equal(env.store.data.published[KEY2], '2026-11-10');
+  assert.equal(env.store.data.published[KEY], '2026-11-10');
+  assert.equal(firstSlot(env, KEY), parseLocalDate('2026-10-11'));
+});
+
+test('consumerStartDate on one point of two: each asked from its own start, nothing lost', async (t) => {
+  const api = registered(
+    { [E.MP2]: '2026-11-05' },
+    { start: { [E.MP2]: '2026-11-05T00:00:00.000+01:00' } },
+  );
+  const env = await ready({ api });
+  t.after(() => env.app.stop());
+  const series = env.api.calls.filter((c) => c.op === 'series');
+  assert.deepEqual(
+    series.map((c) => [c.from, c.ids]),
+    [
+      ['2026-10-11', [E.MP]],
+      ['2026-11-05', [E.MP2]],
+    ],
+  );
+  assert.equal(firstSlot(env, KEY2), parseLocalDate('2026-11-05'));
+});
+
+test('the start found is kept: the next read does not search again', async (t) => {
+  // The first day is incomplete (no mark yet): the next read asks from the floor.
+  const hole = parseLocalDate('2026-11-05') + 3 * HOUR;
+  const api = registered(
+    { [E.MP]: '2026-11-05' },
+    { ids: [E.MP], value: (at) => (at === hole ? null : E.hourly(at)) },
+  );
+  const env = await ready({ api });
+  t.after(() => env.app.stop());
+  const n = env.api.count('series');
+  assert.equal(env.store.data.published[KEY], undefined);
+  await env.wait(4 * HOUR + MINUTE);
+  const next = env.api.calls.filter((c) => c.op === 'series').slice(n);
+  assert.deepEqual(
+    next.map((c) => c.from),
+    ['2026-11-05'],
+  );
+});
+
+test('the searches of a read stay within their budget; the rest goes on at the next read', async (t) => {
+  const ids = Array.from({ length: 10 }, (_, i) => `57131310000${String(1000000 + i)}`);
+  const api = registered(Object.fromEntries(ids.map((id) => [id, '2026-11-08'])), { ids });
+  const env = await ready({ api });
+  t.after(() => env.app.stop());
+  const first = env.api.count('series');
+  assert.ok(first <= 1 + 8, `${first} series requests in the first read`);
+  assert.ok(env.store.data.requests.count <= 2 + 2 + 9);
+  await env.wait(3 * DAY);
+  // Every point, its search cut or not, published from its first day: none lost.
+  for (const id of ids) {
+    assert.equal(firstSlot(env, keyOf(E.ID_KEY, 'mp', id)), parseLocalDate('2026-11-08'), id);
+  }
+});
+
+test('a 401 or 403 of GetToken is a refusal: empty, JSON, or with a Bearer challenge', async (t) => {
+  const forms = [
+    () => new Response(null, { status: 401 }),
+    () => new Response('', { status: 403 }),
+    () =>
+      new Response('Unauthorized', {
+        status: 401,
+        headers: { 'www-authenticate': 'Bearer error="invalid_token"' },
+      }),
+    () => json({ title: 'Unauthorized', status: 401 }, 401),
+  ];
+  for (const form of forms) {
+    const env = await started({ api: createApi({ token: form }) });
+    t.after(() => env.app.stop());
+    assert.match(statusText(env), /refused the token/);
+    assert.ok(env.store.data.refused);
+    await env.wait(DAY);
+    assert.equal(env.api.count('token'), 1);
+  }
+});
+
+test('Quarter refused by a bare ProblemDetails or a text error code: Hour, kept', async (t) => {
+  for (const refuse of [
+    () => json({ type: 'about:blank', title: 'Bad Request', status: 400 }, 400),
+    () => json({ errorCode: '30008', errorText: 'RequestedAggregationUnavailable' }, 400),
+  ]) {
+    const api = createApi({
+      series: (call) => (call.aggregation === 'Quarter' ? refuse() : defaults.series(call)),
+    });
+    const env = await ready({ api });
+    t.after(() => env.app.stop());
+    assert.deepEqual(
+      env.api.calls.filter((c) => c.op === 'series').map((c) => c.aggregation),
+      ['Quarter', 'Hour'],
+    );
+    assert.equal(env.store.data.published[KEY], '2026-11-10');
+    await env.wait(DAY);
+    assert.ok(
+      env.api.calls
+        .filter((c) => c.op === 'series')
+        .slice(2)
+        .every((c) => c.aggregation === 'Hour'),
+    );
+  }
+});
+
+test('Quarter refused in the result (30008 for the point): Hour', async (t) => {
+  const api = createApi({
+    series: (call) =>
+      call.aggregation === 'Quarter'
+        ? { result: call.ids.map((id) => E.failed(id, 30008, 'RequestedAggregationUnavailable')) }
+        : defaults.series(call),
+  });
+  const env = await ready({ api });
+  t.after(() => env.app.stop());
+  assert.deepEqual(
+    env.api.calls.filter((c) => c.op === 'series').map((c) => c.aggregation),
+    ['Quarter', 'Hour'],
+  );
+  assert.equal(env.store.data.published[KEY], '2026-11-10');
+});
+
+test('a failure of Gladys to take the consumption is retried within the day', async (t) => {
+  const env = await started();
+  t.after(() => env.app.stop());
+  await createAll(env);
+  const real = env.gladys.publishEnergyConsumption.bind(env.gladys);
+  let fail = true;
+  env.gladys.publishEnergyConsumption = async (...args) => {
+    if (fail) throw Object.assign(new Error('busy'), { status: 503 });
+    return real(...args);
+  };
+  await env.wait(2 * MINUTE);
+  assert.match(statusText(env), /gladys/);
+  fail = false;
+  await env.wait(4 * HOUR + MINUTE);
+  assert.equal(env.store.data.published[KEY], '2026-11-10');
+  assert.equal(localDate(env.api.calls.at(-1).at), TODAY);
+});
+
+test('an error while searching: the points already answered are published', async (t) => {
+  let searches = 0;
+  const base = registered({ [E.MP2]: '2026-11-05' });
+  const api = createApi({
+    list: base.answers.list,
+    series: (call, now) => {
+      if (call.ids.length === 1 && ++searches === 2) return json({}, 429, { 'retry-after': '60' });
+      return base.answers.series(call, now);
+    },
+  });
+  const env = await ready({ api });
+  t.after(() => env.app.stop());
+  assert.equal(env.store.data.published[KEY], '2026-11-10');
+  assert.match(statusText(env), /slow down/);
 });

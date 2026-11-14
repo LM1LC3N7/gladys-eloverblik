@@ -3,8 +3,8 @@
   "type": "device",
   "name": "Eloverblik (Denmark)",
   "description": {
-    "en": "Unofficial: hourly consumption of your Danish electricity meters through Eloverblik.",
-    "fr": "Non officiel : consommation horaire de vos compteurs danois via Eloverblik."
+    "en": "Unofficial: consumption of your Danish electricity meters through Eloverblik.",
+    "fr": "Non officiel : consommation de vos compteurs électriques danois via Eloverblik."
   },
   "version": "0.1.0",
   "docker_image": "ghcr.io/lm1lc3n7/gladys-eloverblik:0.1.0",
@@ -22,8 +22,8 @@
         "fr": "Jeton Eloverblik"
       },
       "description": {
-        "en": "Unofficial connector, not affiliated with Energinet. On eloverblik.dk, log in with MitID, link your metering points, then create a token (Data sharing / API). The integration reads, once a day, the hourly consumption of every metering point you create in Discovery; Eloverblik serves it one or two days late, so the energy monitoring of Gladys fills up after the fact (each hour in two half hours). Read-only. The token is valid for a year: create a new one before it ends (the status shows the date). For the costs, pair it with an energy contract (for example the Energi Data Service integration for Danish tariffs and spot prices).",
-        "fr": "Connecteur non officiel, sans lien avec Energinet. Sur eloverblik.dk, connectez-vous avec MitID, liez vos points de comptage, puis créez un jeton (partage de données / API). L'intégration lit une fois par jour la consommation horaire de chaque point de comptage créé dans Découverte ; Eloverblik la donne avec un ou deux jours de retard, le suivi d'énergie de Gladys se remplit donc après coup (chaque heure en deux demi-heures). Lecture seule. Le jeton est valable un an : créez-en un nouveau avant la fin (le statut en donne la date). Pour les coûts, associez-le à un contrat d'énergie (par exemple l'intégration Energi Data Service pour les tarifs danois et le prix spot)."
+        "en": "Unofficial connector, not affiliated with Energinet. On eloverblik.dk, log in with MitID, link your metering points, then create a token (Data sharing / API). The integration reads, once a day, the consumption of every metering point you create in Discovery; Eloverblik serves it one or two days late, so the energy monitoring of Gladys fills up after the fact (quarter hours added two by two, or each hour in two half hours). Read-only. The token is valid for a year: create a new one before it ends (the status shows the date). For the costs, pair it with an energy contract (for example the Energi Data Service integration for Danish tariffs and spot prices).",
+        "fr": "Connecteur non officiel, sans lien avec Energinet. Sur eloverblik.dk, connectez-vous avec MitID, liez vos points de comptage, puis créez un jeton (partage de données / API). L'intégration lit une fois par jour la consommation de chaque point de comptage créé dans Découverte ; Eloverblik la donne avec un ou deux jours de retard, le suivi d'énergie de Gladys se remplit donc après coup (quarts d'heure additionnés deux à deux, ou chaque heure en deux demi-heures). Lecture seule. Le jeton est valable un an : créez-en un nouveau avant la fin (le statut en donne la date). Pour les coûts, associez-le à un contrat d'énergie (par exemple l'intégration Energi Data Service pour les tarifs danois et le prix spot)."
       },
       "links": [
         {

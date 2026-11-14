@@ -69,7 +69,7 @@ scripts/                          cover.png generator, mutation runner and list
   one request at a time, 2 s apart; the data access token kept in memory 20 h;
   two GetToken never closer than 5 minutes (kept in /data); 429 and 5xx pause
   everything (Retry-After, 15 min doubled up to 6 h, kept in /data).
-- **Refusal** only from GetToken (a 401 or 403 of the API itself, codes 50000 /
+- **Refusal** only from GetToken (a 401/403 empty, JSON or with a Bearer challenge, codes 50000 /
   50001); a 401/403 of a data route only drops the access token.
 - **Energy**: no index, never `publishStates`; an unavailable or incomplete
   hour (A02, A05) stays unknown, never 0; a day is complete when every half
