@@ -1,0 +1,206 @@
+[
+  {
+    "name": "no daily ceiling",
+    "file": "src/app.js",
+    "from": "if (this.data.requests.count >= MAX_REQUESTS_PER_DAY) {",
+    "to": "if (false) {"
+  },
+  {
+    "name": "data request not counted before it leaves",
+    "file": "src/app.js",
+    "from": "() => this.countRequest())",
+    "to": "undefined)"
+  },
+  {
+    "name": "GetToken gap not checked before sending",
+    "file": "src/app.js",
+    "from": "if (token && this.tokenDue(mono, now) > mono) throw new EloverblikError('token_wait');",
+    "to": ""
+  },
+  {
+    "name": "GetToken gap not in the schedule",
+    "file": "src/app.js",
+    "from": "if (!this.accessValid(mono)) due = Math.max(due, this.tokenDue(mono, now));",
+    "to": ""
+  },
+  {
+    "name": "a 403 page of a proxy taken as a refusal",
+    "file": "src/app.js",
+    "from": "return err.status === 401 || Boolean(err.fromApi);",
+    "to": "return true;"
+  },
+  {
+    "name": "a data 401 taken as a refusal",
+    "file": "src/app.js",
+    "from": "        this.roundProblem = code === 'unauthorized' ? 'data_unauthorized' : code;",
+    "to": "        if (code === 'unauthorized') await this.refuse();\n        this.roundProblem = code;"
+  },
+  {
+    "name": "refusal not kept",
+    "file": "src/app.js",
+    "from": "if (!this.session || !this.idKey || this.isRefused()) return undefined;",
+    "to": "if (!this.session || !this.idKey) return undefined;"
+  },
+  {
+    "name": "quality not checked",
+    "file": "src/eloverblik/model.js",
+    "from": "if (quality !== undefined && quality !== null && !READINGS.has(quality)) return undefined;",
+    "to": ""
+  },
+  {
+    "name": "A05 taken as a reading",
+    "file": "src/eloverblik/model.js",
+    "from": "const READINGS = new Set(['A01', 'A03', 'A04']);",
+    "to": "const READINGS = new Set(['A01', 'A03', 'A04', 'A05']);"
+  },
+  {
+    "name": "5xx does not pause",
+    "file": "src/app.js",
+    "from": "const PAUSING = new Set(['rate_limited', 'server']);",
+    "to": "const PAUSING = new Set(['rate_limited']);"
+  },
+  {
+    "name": "Retry-After ignored",
+    "file": "src/app.js",
+    "from": "const asked = finite(err.retryAfter) && err.retryAfter > 0 ? err.retryAfter : 0;",
+    "to": "const asked = 0;"
+  },
+  {
+    "name": "mark moved on a metering point error",
+    "file": "src/app.js",
+    "from": "if (published && result && !result.problem) {",
+    "to": "if (published) {"
+  },
+  {
+    "name": "incomplete day does not stop the mark",
+    "file": "src/app.js",
+    "from": "if (!complete && d >= shiftDate(today, -HOLE_WAIT_DAYS)) break;",
+    "to": ""
+  },
+  {
+    "name": "access token never reused",
+    "file": "src/app.js",
+    "from": "return Boolean(this.access && mono - this.access.at < ACCESS_TOKEN_LIFE);",
+    "to": "return false;"
+  },
+  {
+    "name": "access token kept for ever",
+    "file": "src/app.js",
+    "from": "return Boolean(this.access && mono - this.access.at < ACCESS_TOKEN_LIFE);",
+    "to": "return Boolean(this.access);"
+  },
+  {
+    "name": "slots outside the window published",
+    "file": "src/app.js",
+    "from": ".filter(([at]) => at >= startMs && at < endMs && at + HALF_HOUR <= nowMs)",
+    "to": ".filter(([at]) => at + HALF_HOUR <= nowMs)"
+  },
+  {
+    "name": "unreadable /data overwritten",
+    "file": "src/app.js",
+    "from": "if (this.storeState !== 'ok' && this.storeState !== 'unwritable') return false;",
+    "to": ""
+  },
+  {
+    "name": "a future time of /data accepted",
+    "file": "src/app.js",
+    "from": "data[field] <= now &&",
+    "to": ""
+  },
+  {
+    "name": "a wall clock set back counts a new day",
+    "file": "src/app.js",
+    "from": "if (!this.data.requests || this.data.requests.date < today) {",
+    "to": "if (!this.data.requests || this.data.requests.date !== today) {"
+  },
+  {
+    "name": "no ceiling of reads per day",
+    "file": "src/app.js",
+    "from": "else if (rounds >= ROUNDS_PER_DAY) due = tomorrow;",
+    "to": ""
+  },
+  {
+    "name": "no retry gap",
+    "file": "src/app.js",
+    "from": "else due = Math.max(gap(RETRY_GAP), gap(MIN_ROUND_GAP));",
+    "to": "else due = gap(SOON_GAP);"
+  },
+  {
+    "name": "a new token does not lift the refusal",
+    "file": "src/app.js",
+    "from": "if (tokenChanged) {\n      this.soon = true;\n      if (this.refused) {",
+    "to": "if (tokenChanged) {\n      this.soon = true;\n      if (false) {"
+  },
+  {
+    "name": "Test does not lift the refusal",
+    "file": "src/app.js",
+    "from": "// Accepted: the refusal and the pause are over; a read soon.\n    if (this.refused) {",
+    "to": "// Accepted: the refusal and the pause are over; a read soon.\n    if (false) {"
+  },
+  {
+    "name": "a data 401 keeps the access token",
+    "file": "src/app.js",
+    "from": "if (err?.code === 'unauthorized') this.access = undefined;",
+    "to": ""
+  },
+  {
+    "name": "API token error codes not a refusal",
+    "file": "src/eloverblik/model.js",
+    "from": "if (TOKEN_REFUSED.has(body.errorCode)) return { refused: true };",
+    "to": ""
+  },
+  {
+    "name": "streamed body not bounded",
+    "file": "src/eloverblik/client.js",
+    "from": "if (size > max) {",
+    "to": "if (false) {"
+  },
+  {
+    "name": "a 429 does not hold the queue",
+    "file": "src/app.js",
+    "from": "if (PAUSING.has(err?.code)) this.applyPause(err);",
+    "to": ""
+  },
+  {
+    "name": "a request sent during a pause",
+    "file": "src/app.js",
+    "from": "if (this.pauseActive()) throw new EloverblikError('paused');",
+    "to": ""
+  },
+  {
+    "name": "token sent to data routes",
+    "file": "src/app.js",
+    "from": ".request({ ...route, bearer: () => this.access?.token }",
+    "to": ".request({ ...route, bearer: () => this.token }"
+  },
+  {
+    "name": "ids in the URL",
+    "file": "src/eloverblik/client.js",
+    "from": "path: `/api/meterdata/gettimeseries/${from}/${to}/Hour`,",
+    "to": "path: `/api/meterdata/gettimeseries/${from}/${to}/Hour?ids=${ids.join(',')}`,"
+  },
+  {
+    "name": "hour not split in halves",
+    "file": "src/eloverblik/model.js",
+    "from": "item.slots.set(at, kwh / 2);\n            item.slots.set(at + HALF_HOUR, kwh / 2);",
+    "to": "item.slots.set(at, kwh);\n            item.slots.set(at + HALF_HOUR, kwh);"
+  },
+  {
+    "name": "a lone quarter hour taken",
+    "file": "src/eloverblik/model.js",
+    "from": "if (q.seen.size === 2) item.slots.set(slot, q.sum);",
+    "to": "item.slots.set(slot, q.sum);"
+  },
+  {
+    "name": "production series read",
+    "file": "src/eloverblik/model.js",
+    "from": "if (!CONSUMPTION.has(series.businessType)) continue;",
+    "to": ""
+  },
+  {
+    "name": "only consumption points not filtered",
+    "file": "src/eloverblik/model.js",
+    "from": "if (mp.typeOfMP !== 'E17') {",
+    "to": "if (false) {"
+  }
+]

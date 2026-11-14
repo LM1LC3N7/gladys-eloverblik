@@ -1,45 +1,55 @@
 // -----------------------------------------------------------------------------
-// Integration configuration.
-//
-// The configuration is filled in by the user in Gladys, from the `config_schema`
-// declared in `gladys-assistant-integration.json`. The SDK fetches it for you
-// (`gladys.getConfig()`) and notifies you of every change through
-// `gladys.onConfigUpdated()`.
-//
-// This module only provides defaults and normalizes the received object, so the
-// rest of the code never has to deal with `undefined`.
+// The configuration of the form, normalized: the Eloverblik token the user
+// created in the portal (a JWT, the "refresh token" of the API). Nothing here
+// talks to the network; nothing here is ever written out (the token stays in
+// memory).
 // -----------------------------------------------------------------------------
 
-// Defaults: they MUST stay consistent with the `default` values declared in the
-// `config_schema` of the manifest.
-export const DEFAULT_CONFIG = {
-  latitude: 48.8566, // Paris
-  longitude: 2.3522,
-  unit: 'celsius', // 'celsius' | 'fahrenheit'
-  // Seconds between two reads of the polled sensors. Gladys polls at most once
-  // a minute: slower intervals are applied by skipping polls (see
-  // createPoller in src/devices/index.js).
-  poll_frequency: 300,
-  // Reserved key (NOT in config_schema): because the manifest declares both
-  // 'local' and 'cloud' in its `transports` field, Gladys shows a standard
-  // "Prefer the local connection" toggle and sends the user's choice here.
-  // Read-only for the integration; defaults to true.
-  GLADYS_PREFER_LOCAL: true,
-};
+/** Control characters (CR, LF, tab included): never in a token. */
+// eslint-disable-next-line no-control-regex
+const CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
+/** A JWT: three base64url parts (the API says the token is a JWT). */
+const JWT = /^[A-Za-z0-9_-]{2,}\.[A-Za-z0-9_-]{2,}\.[A-Za-z0-9_-]*$/;
+const MAX_TOKEN = 8192;
 
 /**
- * Merge the user config with the defaults.
- * @param {Record<string, unknown>} raw config returned by the SDK
+ * `{ token, problem }`: `problem` names what keeps the integration from
+ * reading (nothing is sent then).
  */
 export function normalizeConfig(raw = {}) {
-  return {
-    ...DEFAULT_CONFIG,
-    ...raw,
-    // Force the types: config may arrive as strings from a form.
-    latitude: Number(raw.latitude ?? DEFAULT_CONFIG.latitude),
-    longitude: Number(raw.longitude ?? DEFAULT_CONFIG.longitude),
-    poll_frequency: Number(raw.poll_frequency ?? DEFAULT_CONFIG.poll_frequency),
-    // The preference is a boolean; anything but an explicit false means true.
-    GLADYS_PREFER_LOCAL: raw.GLADYS_PREFER_LOCAL !== false,
-  };
+  const config = { token: '', problem: undefined };
+  const token = raw?.refresh_token;
+  if (token !== undefined && token !== null && typeof token !== 'string') {
+    config.problem = 'malformed';
+    return config;
+  }
+  // A copy from the portal may carry spaces or line breaks around it.
+  const text = (token ?? '').trim();
+  if (text.length > MAX_TOKEN || CONTROL.test(text)) {
+    config.problem = 'malformed';
+    return config;
+  }
+  if (!text) config.problem = 'missing';
+  else if (!JWT.test(text)) config.problem = 'badToken';
+  else config.token = text;
+  return config;
+}
+
+/**
+ * The expiry of the token (the `exp` of its payload, seconds), read without
+ * any check of the signature: shown in the status only, never a decision.
+ * Undefined when unreadable.
+ */
+export function tokenExpiry(token) {
+  const part = typeof token === 'string' ? token.split('.')[1] : undefined;
+  if (!part || part.length > 6000) return undefined;
+  try {
+    const payload = JSON.parse(Buffer.from(part, 'base64url').toString('utf8'));
+    const exp = payload?.exp;
+    return Number.isInteger(exp) && exp > 1_500_000_000 && exp < 4_102_444_800
+      ? exp * 1000
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
