@@ -32,8 +32,8 @@ test('the token answer: the access token, a refusal by error code, unreadable ot
 test('the metering points: consumption ones only, 18 digits, 10 at most, sorted', () => {
   const list = parseMeteringPoints(E.meteringPoints([E.MP2, E.MP, E.MP]));
   assert.deepEqual(list.points, [
-    { id: E.MP, supplier: 'Test Energi A/S' },
-    { id: E.MP2, supplier: 'Test Energi A/S' },
+    { id: E.MP, supplier: 'Test Energi A/S', startDate: undefined },
+    { id: E.MP2, supplier: 'Test Energi A/S', startDate: undefined },
   ]);
   assert.equal(list.others, 1);
   const many = Array.from({ length: 12 }, (_, i) => `5713131000000${String(i).padStart(5, '0')}`);
@@ -48,7 +48,7 @@ test('the metering points: consumption ones only, 18 digits, 10 at most, sorted'
       null,
     ],
   });
-  assert.deepEqual(bad.points, [{ id: E.MP2, supplier: 'A  B' }]);
+  assert.deepEqual(bad.points, [{ id: E.MP2, supplier: 'A  B', startDate: undefined }]);
   assert.equal(parseMeteringPoints({ result: 'x' }), undefined);
 });
 
@@ -221,4 +221,53 @@ test('the keys of the metering points: HMAC, 16 hex digits, never the id', () =>
   assert.notEqual(key, keyOf(E.ID_KEY, 'mp', E.MP2));
   assert.notEqual(key, keyOf('b'.repeat(64), 'mp', E.MP));
   assert.equal(MINUTE, 60_000);
+});
+
+test('consumerStartDate: the local date of Denmark, or nothing when unreadable', () => {
+  const start = (value) =>
+    parseMeteringPoints(E.meteringPoints([E.MP], { production: [], starts: { [E.MP]: value } }))
+      .points[0].startDate;
+  assert.equal(start('2026-11-04T23:00:00Z'), '2026-11-05');
+  assert.equal(start('2026-11-05T00:00:00.000+01:00'), '2026-11-05');
+  assert.equal(start('2026-11-05'), '2026-11-05');
+  assert.equal(start('2026-02-30'), undefined);
+  assert.equal(start('2026-11-05T00:00:00'), undefined);
+  assert.equal(start('soon'), undefined);
+});
+
+test('a quarter hour received twice is counted once; an instant without a zone is refused', () => {
+  const body = (start, points) => ({
+    result: [
+      {
+        success: true,
+        id: E.MP,
+        MyEnergyData_MarketDocument: {
+          TimeSeries: [
+            {
+              mRID: E.MP,
+              businessType: 'A04',
+              'measurement_Unit.name': 'KWH',
+              Period: [
+                {
+                  resolution: 'PT15M',
+                  timeInterval: { start, end: '2026-11-11T00:00:00Z' },
+                  Point: points,
+                },
+              ],
+            },
+          ],
+        },
+      },
+    ],
+  });
+  const q = (position, quantity) => ({ position, 'out_Quantity.quantity': quantity });
+  const twice = parseTimeSeries(
+    body('2026-11-10T23:00:00Z', [q('1', '0.100'), q('1', '0.100'), q('2', '0.200')]),
+    [E.MP],
+  ).get(E.MP);
+  assert.deepEqual([...twice.slots], [[at('2026-11-10T23:00:00Z'), 0.3]]);
+  const noZone = parseTimeSeries(body('2026-11-10T23:00:00', [q('1', '0.1'), q('2', '0.2')]), [
+    E.MP,
+  ]).get(E.MP);
+  assert.equal(noZone.slots.size, 0);
 });

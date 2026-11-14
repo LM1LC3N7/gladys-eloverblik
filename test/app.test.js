@@ -191,7 +191,7 @@ test('a 403 page of a proxy on GetToken is not a refusal; a 403 of the API is on
   t.after(() => env.app.stop());
   assert.doesNotMatch(statusText(env), /refused/);
   assert.match(statusText(env), /did not succeed/);
-  assert.match(statusText(env), /token_forbidden/);
+  assert.match(statusText(env), /token_unauthorized_page/);
   api.answers.token = () => json({ title: 'Forbidden', status: 403 }, 403);
   await env.wait(4 * HOUR + TOKEN_GAP);
   assert.match(statusText(env), /refused the token/);
@@ -513,4 +513,243 @@ test('a 429 holds the requests already queued behind it: none is sent', async (t
   await env.wait(0);
   assert.equal(env.api.ops().at(-1), 'series', env.api.ops().join());
   assert.match(out.en, /asked to wait/);
+});
+
+// --- Review r1 -----------------------------------------------------------------------
+
+test('a day with a hole is given up once 10 days old: the mark goes past it', async (t) => {
+  // 25 October (the autumn change), 05:00 local: A02. Older than 10 days at the first read.
+  const hole = parseLocalDate('2026-10-25') + 5 * HOUR;
+  const api = createApi({
+    series: ({ ids, from, to }) =>
+      E.timeSeries({ ids, from, to, value: (at) => (at === hole ? null : E.hourly(at)) }),
+  });
+  const env = await ready({ api });
+  t.after(() => env.app.stop());
+  assert.equal(env.store.data.published[KEY], '2026-11-10');
+  assert.ok(!slotsOf(env).some((s) => Date.parse(s.starts_at) === hole));
+});
+
+test('after a long stop, caught up 92 days back at most', async (t) => {
+  const store = createMemoryStore({ published: { [KEY]: '2026-06-01' } });
+  const env = await ready({ store });
+  t.after(() => env.app.stop());
+  const series = env.api.calls.filter((c) => c.op === 'series');
+  assert.equal(series[0].from, '2026-08-11');
+});
+
+test('pauses are capped to 6 hours: a Retry-After of a week, a pause of /data of 2 days', async (t) => {
+  const api = createApi({
+    series: () => json({ title: 'Too many' }, 429, { 'retry-after': String(7 * 86400) }),
+  });
+  const env = await ready({ api });
+  t.after(() => env.app.stop());
+  assert.ok(env.app.pause.until - env.clock.now <= 6 * HOUR + 1);
+  assert.ok(env.app.pause.until - env.clock.now >= 6 * HOUR - 2 * MINUTE);
+  const store = createMemoryStore({
+    pause: { until: E.NOW + 2 * DAY, count: 1, code: 'server', detail: 'HTTP 503' },
+  });
+  const again = await started({ store });
+  t.after(() => again.app.stop());
+  assert.ok(again.app.pause.until - E.NOW <= 6 * HOUR);
+  await again.wait(6 * HOUR + MINUTE);
+  assert.ok(again.api.calls.length > 0);
+});
+
+test('every request is counted in /data before it leaves; a GetToken keeps its time there', async (t) => {
+  const store = createMemoryStore();
+  const seen = [];
+  const look = (op) => () => seen.push([op, store.data.requests?.count, store.data.lastToken]);
+  const api = createApi({});
+  for (const op of ['token', 'list']) {
+    const answer = api.answers[op];
+    api.answers[op] = (call, now) => (look(op)(), answer(call, now));
+  }
+  const env = await started({ store, api });
+  t.after(() => env.app.stop());
+  assert.deepEqual(seen, [
+    ['token', 1, E.NOW],
+    ['list', 2, E.NOW],
+  ]);
+});
+
+test('a wall clock set forward is seen within an hour (long waits cut in pieces)', async (t) => {
+  const wall = { offset: 0 };
+  const env = await ready({ wall });
+  t.after(() => env.app.stop());
+  const n = env.api.calls.length;
+  // Tomorrow's read is about 20 hours ahead; the wall clock jumps a day.
+  wall.offset = DAY;
+  await env.wait(HOUR + MINUTE);
+  assert.ok(env.api.calls.length > n);
+});
+
+test('stop() aborts the request in flight and nothing is sent after it', async () => {
+  const api = createApi({ series: () => new Promise(() => {}) });
+  const env = await started({ api });
+  await createAll(env);
+  await env.wait(2 * MINUTE);
+  const inFlight = env.api.calls.at(-1);
+  assert.equal(inFlight.op, 'series');
+  await env.app.stop();
+  assert.equal(inFlight.signal.aborted, true);
+  const n = env.api.calls.length;
+  await env.wait(2 * DAY);
+  assert.equal(env.api.calls.length, n);
+  assert.equal(env.pending.size, 0);
+});
+
+test('a new token clears the refusal on disk at once', async (t) => {
+  const api = createApi({ token: () => json({ status: 401 }, 401) });
+  const env = await started({ api });
+  t.after(() => env.app.stop());
+  assert.ok(env.store.data.refused);
+  await env.gladys.fake.configUpdated({ refresh_token: E.TOKEN2, id_key: E.ID_KEY });
+  assert.equal(env.store.data.refused, null);
+});
+
+test('a read cut by a 5xx is not one of the reads of the day', async (t) => {
+  const api = createApi({ series: () => json({ title: 'DataHub unavailable' }, 503) });
+  const env = await ready({ api });
+  t.after(() => env.app.stop());
+  // The first read (list only) counts; the one cut by the 503 does not.
+  assert.equal(env.store.data.rounds, 1);
+});
+
+test('a 401 page (not JSON) of GetToken is not a refusal', async (t) => {
+  const api = createApi({
+    token: () =>
+      new Response('<html>401</html>', { status: 401, headers: { 'content-type': 'text/html' } }),
+  });
+  const env = await started({ api });
+  t.after(() => env.app.stop());
+  assert.doesNotMatch(statusText(env), /refused/);
+  assert.equal(env.store.data.refused, null);
+  assert.match(statusText(env), /token_unauthorized_page/);
+});
+
+test('a token entered after a malformed one is a new token: read soon', async (t) => {
+  const env = await started();
+  t.after(() => env.app.stop());
+  assert.deepEqual(env.api.ops(), ['token', 'list']);
+  await env.gladys.fake.configUpdated({ refresh_token: 'not a token', id_key: E.ID_KEY });
+  await env.gladys.fake.configUpdated({ refresh_token: E.TOKEN2, id_key: E.ID_KEY });
+  await env.wait(10 * MINUTE);
+  assert.deepEqual(env.api.ops(), ['token', 'list', 'token', 'list']);
+  assert.equal(env.api.calls[2].auth, `Bearer ${E.TOKEN2}`);
+});
+
+test('a metering point taken over recently: asked from that day only', async (t) => {
+  const api = createApi({
+    list: () => E.meteringPoints([E.MP], { starts: { [E.MP]: '2026-11-04T23:00:00Z' } }),
+  });
+  const env = await ready({ api });
+  t.after(() => env.app.stop());
+  const series = env.api.calls.filter((c) => c.op === 'series');
+  assert.equal(series[0].from, '2026-11-05');
+  assert.equal(env.store.data.published[KEY], '2026-11-10');
+});
+
+test('30018 (before its registration): asked again alone from a later day, published at once', async (t) => {
+  const REG = '2026-11-05';
+  const api = createApi({
+    list: () => E.meteringPoints([E.MP, E.MP2]),
+    series: ({ ids, from, to }) => {
+      const out = { result: [] };
+      if (ids.includes(E.MP)) out.result.push(...E.timeSeries({ ids: [E.MP], from, to }).result);
+      if (ids.includes(E.MP2)) {
+        out.result.push(
+          from < REG ? E.failed(E.MP2, 30018) : E.timeSeries({ ids: [E.MP2], from, to }).result[0],
+        );
+      }
+      return out;
+    },
+  });
+  const env = await ready({ api });
+  t.after(() => env.app.stop());
+  const series = env.api.calls.filter((c) => c.op === 'series');
+  assert.deepEqual(series[0].ids, [E.MP, E.MP2]);
+  assert.ok(series.length <= 4, `${series.length} series requests`);
+  assert.ok(series.slice(1).every((c) => c.ids.length === 1 && c.ids[0] === E.MP2));
+  assert.ok(slotsOf(env, F(KEY2)).length > 0);
+  assert.equal(env.store.data.published[KEY2], '2026-11-10');
+  assert.equal(env.store.data.published[KEY], '2026-11-10');
+});
+
+test('a metering point without data (30015) is read again once a day only', async (t) => {
+  const api = createApi({
+    series: ({ ids }) => ({ result: ids.map((id) => E.failed(id, 30015)) }),
+  });
+  const env = await ready({ api });
+  t.after(() => env.app.stop());
+  assert.match(statusText(env), /E30015/);
+  await env.wait(12 * HOUR);
+  assert.equal(env.api.count('series'), 1);
+  await env.wait(DAY);
+  assert.equal(env.api.count('series'), 2);
+});
+
+test('Quarter first; Hour once DataHub refuses the aggregation (30008)', async (t) => {
+  const api = createApi({
+    series: (call) =>
+      call.aggregation === 'Quarter'
+        ? json({ errorCode: 30008, errorText: 'RequestedAggregationUnavailable' }, 400)
+        : defaults.series(call),
+  });
+  const env = await ready({ api });
+  t.after(() => env.app.stop());
+  const series = env.api.calls.filter((c) => c.op === 'series');
+  assert.deepEqual(
+    series.map((c) => c.aggregation),
+    ['Quarter', 'Hour'],
+  );
+  assert.equal(env.store.data.published[KEY], '2026-11-10');
+});
+
+test('ten metering points: the end of the token stays in the bounded status', async (t) => {
+  const ids = Array.from({ length: 10 }, (_, i) => `57131310000000${String(1000 + i)}`);
+  const api = createApi({ list: () => E.meteringPoints(ids) });
+  const env = await ready({ api });
+  t.after(() => env.app.stop());
+  for (const lang of ['en', 'fr']) {
+    assert.match(env.fake.connectionStatus.message[lang], /30\/06\/2027/);
+  }
+});
+
+test('the first read of a day (wall clock set back) keeps the hour after the last one', async (t) => {
+  const wall = { offset: 0 };
+  const api = createApi({
+    series: ({ ids, from }) => E.timeSeries({ ids, from, to: '2026-11-09' }),
+  });
+  const env = await ready({ api, wall });
+  t.after(() => env.app.stop());
+  const n = env.api.count('series');
+  // 22:30 of the day before: a "new" day whose read time is past.
+  wall.offset = -15 * HOUR;
+  env.app.schedule(env.app.gen);
+  await env.wait(30 * MINUTE);
+  assert.equal(env.api.count('series'), n);
+  await env.wait(40 * MINUTE);
+  assert.equal(env.api.count('series'), n + 1);
+});
+
+test('restarted with a malformed token, then a new one: the refusal kept in /data is lifted', async (t) => {
+  // A salt that gives both tokens the same 8-bit tag.
+  let salt;
+  for (let i = 0; ; i += 1) {
+    const buf = Buffer.alloc(16);
+    buf.writeUInt32BE(i);
+    if (tagOf(buf.toString('hex'), E.TOKEN) === tagOf(buf.toString('hex'), E.TOKEN2)) {
+      salt = buf.toString('hex');
+      break;
+    }
+  }
+  const store = createMemoryStore({ refused: { salt, tag: tagOf(salt, E.TOKEN) } });
+  const env = await started({ store, config: { refresh_token: 'not a token', id_key: E.ID_KEY } });
+  t.after(() => env.app.stop());
+  assert.equal(env.api.calls.length, 0);
+  await env.gladys.fake.configUpdated({ refresh_token: E.TOKEN2, id_key: E.ID_KEY });
+  await env.wait(10 * MINUTE);
+  assert.deepEqual(env.api.ops(), ['token', 'list']);
+  assert.equal(store.data.refused, null);
 });

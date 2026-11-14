@@ -241,9 +241,9 @@ export const routes = {
     method: 'GET',
     path: '/api/meteringpoints/meteringpoints?includeAll=false',
   }),
-  timeSeries: (ids, from, to) => ({
+  timeSeries: (ids, from, to, aggregation = 'Hour') => ({
     method: 'POST',
-    path: `/api/meterdata/gettimeseries/${from}/${to}/Hour`,
+    path: `/api/meterdata/gettimeseries/${from}/${to}/${aggregation === 'Quarter' ? 'Quarter' : 'Hour'}`,
     body: { meteringPoints: { meteringPoint: ids } },
   }),
 };

@@ -52,12 +52,21 @@ access token and lists your points (at most once a minute).
   integration reads once a day, from 09:00 (Danish time, a minute proper to
   your installation, up to 12:00), and asks only for the days not yet
   complete. While yesterday is incomplete, it reads again 4 hours later, 4
-  times a day at most.
-- At the first read, it takes **31 days** back. After a stop, it catches up at
+  scheduled reads a day at most. A device created, a new token or a Test that
+  succeeds brings a read a minute later on top of them; the reads always stay
+  an hour apart otherwise, and within 30 requests a day.
+- At the first read, it takes **31 days** back, never before the day the
+  metering point became yours (`consumerStartDate` of Eloverblik). If DataHub
+  answers that the period starts before its registration (30018) or before
+  the authorization (30010), that point is asked again alone, from a later day
+  (halving the gap to yesterday, 3 times at most in a read). After a stop, it catches up at
   most 92 days back. The last 3 complete days are read again with the next
   days: an estimated value replaced by a measured one is corrected.
-- Each hour is split in **two equal half hours** (the energy monitoring of
-  Gladys works by half hours). An hour Eloverblik marks as not available
+- The integration asks for **quarter hours** and adds them two by two (the
+  energy monitoring of Gladys works by half hours); when DataHub refuses that
+  aggregation (30008, 30011), it asks for hours and splits each one in **two
+  equal half hours** (until a restart). A half hour with a missing quarter
+  stays unknown. An hour Eloverblik marks as not available
   (quality A02) or incomplete (A05) stays **unknown**: it is never counted as 0. A day with a missing hour is asked again for 10 days, then given up.
 - The consumption goes into the energy monitoring with the date of each half
   hour (`publishEnergyConsumption`): there is no cumulative index, and no live
@@ -80,15 +89,17 @@ than 5 minutes, even after a restart (the time is kept in `/data`; the limit
 is 2 a minute per IP).
 
 - **429 (too many requests)** or **503 (DataHub unavailable)** and other 5xx:
-  every request pauses (the `Retry-After` of the answer when given, else 15
-  minutes, doubled each time up to 6 hours). The pause survives a restart.
-- **Refused token** (the token request answers 401, or 403 / an error code of
-  the API): nothing is asked any more; the status says so. Save a new token,
+  every request pauses: 15 minutes, doubled each time up to 6 hours, or the
+  `Retry-After` of the answer when it is longer (6 hours at most). The pause survives a restart.
+- **Refused token** (the token request answers a 401 or 403 of the API
+  itself, or one of its error codes 50000 / 50001; a page of a proxy is not a
+  refusal): nothing is asked any more; the status says so. Save a new token,
   or press Test once the token works again.
 - A 401 or 403 on a **data** route is not a refusal of your token: the access
   token is dropped and a new one is asked at the next read.
 - An error on one metering point (no data, relation expired, ...) is shown in
-  the status with its code (for example `E30015`); the other points go on.
+  the status with its code (for example `E30015`); that point is asked again
+  the next day only, the other points go on.
 
 ## What `/data` keeps
 
@@ -104,7 +115,7 @@ metering point (named by a keyed hash, never its id), the last complete day.
   account).
 - **"Meter …1234: E20010"** (relation not found) or **E30016** (relation
   expired): link the metering point again on eloverblik.dk.
-- **"E30015"**: no data for the period yet; it is asked again.
+- **"E30015"**: no data for the period yet; it is asked again the next day.
 - **"not_listed"**: a created device is no longer among the metering points
   of the token.
 - The Gladys time zone should be the Danish one (or the same clock): the days

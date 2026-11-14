@@ -15,8 +15,8 @@ It reads the Danish electricity metering points of the user through the
 official customer API of **Eloverblik** (`api.eloverblik.dk/customerapi`,
 Swagger V1.0): GetToken trades the token the user created in the portal for a
 data access token (24 h), the list of the metering points, and the hourly time
-series, published after the fact with `publishEnergyConsumption` (each hour in
-two half hours). **Read-only.** Unofficial: not affiliated with Energinet.
+series, published after the fact with `publishEnergyConsumption` (quarter hours
+added two by two, or each hour in two halves). **Read-only.** Unofficial: not affiliated with Energinet.
 
 ## Commands
 
@@ -69,7 +69,7 @@ scripts/                          cover.png generator, mutation runner and list
   one request at a time, 2 s apart; the data access token kept in memory 20 h;
   two GetToken never closer than 5 minutes (kept in /data); 429 and 5xx pause
   everything (Retry-After, 15 min doubled up to 6 h, kept in /data).
-- **Refusal** only from GetToken (401, a 403 of the API, error codes 50000 /
+- **Refusal** only from GetToken (a 401 or 403 of the API itself, codes 50000 /
   50001); a 401/403 of a data route only drops the access token.
 - **Energy**: no index, never `publishStates`; an unavailable or incomplete
   hour (A02, A05) stays unknown, never 0; a day is complete when every half

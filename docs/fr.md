@@ -54,12 +54,22 @@ jeton d'accès et liste vos points (au plus une fois par minute).
   L'intégration lit une fois par jour, à partir de 09:00 (heure danoise, une
   minute propre à votre installation, jusqu'à 12:00), et ne demande que les
   jours pas encore complets. Tant qu'hier est incomplet, elle relit 4 heures
-  plus tard, 4 fois par jour au plus.
-- À la première lecture, elle prend **31 jours** en arrière. Après un arrêt,
+  plus tard, 4 lectures prévues par jour au plus. Un appareil créé, un nouveau
+  jeton ou un Test réussi ajoute une lecture une minute plus tard ; sinon les
+  lectures restent à une heure d'écart au moins, et dans 30 requêtes par jour.
+- À la première lecture, elle prend **31 jours** en arrière, jamais avant le
+  jour où le point de comptage est devenu le vôtre (`consumerStartDate`
+  d'Eloverblik). Si DataHub répond que la période commence avant son
+  enregistrement (30018) ou avant l'autorisation (30010), ce point est
+  redemandé seul à partir d'un jour plus récent (en coupant en deux l'écart
+  jusqu'à hier, 3 fois au plus par lecture). Après un arrêt,
   elle rattrape au plus 92 jours. Les 3 derniers jours complets sont relus avec
   les suivants : une valeur estimée remplacée par une mesure est corrigée.
-- Chaque heure est coupée en **deux demi-heures égales** (le suivi d'énergie de
-  Gladys travaille par demi-heure). Une heure qu'Eloverblik marque non
+- L'intégration demande des **quarts d'heure** et les additionne deux à deux
+  (le suivi d'énergie de Gladys travaille par demi-heure) ; si DataHub refuse
+  cette agrégation (30008, 30011), elle demande des heures et coupe chacune en
+  **deux demi-heures égales** (jusqu'au redémarrage). Une demi-heure à laquelle
+  il manque un quart reste inconnue. Une heure qu'Eloverblik marque non
   disponible (qualité A02) ou incomplète (A05) reste **inconnue** : elle n'est
   jamais comptée 0. Un jour auquel il manque une heure est redemandé pendant 10
   jours, puis abandonné.
@@ -86,18 +96,20 @@ un redémarrage (l'heure est gardée dans `/data` ; la limite est de 2 par
 minute et par IP).
 
 - **429 (trop de requêtes)** ou **503 (DataHub indisponible)** et autres 5xx :
-  toutes les requêtes s'arrêtent (le `Retry-After` de la réponse s'il est
-  donné, sinon 15 minutes, doublées à chaque fois jusqu'à 6 heures). La pause
+  toutes les requêtes s'arrêtent : 15 minutes, doublées à chaque fois jusqu'à
+  6 heures, ou le `Retry-After` de la réponse s'il est plus long (6 heures au
+  plus). La pause
   survit à un redémarrage.
-- **Jeton refusé** (la demande de jeton répond 401, ou 403 / un code d'erreur
-  de l'API) : plus rien n'est demandé ; le statut le dit. Enregistrez un
+- **Jeton refusé** (la demande de jeton reçoit un 401 ou 403 de l'API
+  elle-même, ou l'un de ses codes d'erreur 50000 / 50001 ; une page d'un
+  proxy n'est pas un refus) : plus rien n'est demandé ; le statut le dit. Enregistrez un
   nouveau jeton, ou appuyez sur Tester quand le jeton fonctionne à nouveau.
 - Un 401 ou 403 sur une route de **données** n'est pas un refus de votre
   jeton : le jeton d'accès est oublié et un nouveau est demandé à la lecture
   suivante.
 - Une erreur sur un point de comptage (pas de données, relation expirée…)
-  s'affiche dans le statut avec son code (par exemple `E30015`) ; les autres
-  points continuent.
+  s'affiche dans le statut avec son code (par exemple `E30015`) ; ce point
+  n'est redemandé que le lendemain, les autres points continuent.
 
 ## Ce que garde `/data`
 
@@ -115,7 +127,7 @@ son numéro), le dernier jour complet.
 - **« Compteur …1234 : E20010 »** (relation introuvable) ou **E30016**
   (relation expirée) : liez à nouveau le point de comptage sur eloverblik.dk.
 - **« E30015 »** : pas encore de données pour la période ; elle est
-  redemandée.
+  redemandée le lendemain.
 - **« not_listed »** : un appareil créé n'est plus parmi les points de comptage
   du jeton.
 - Le fuseau horaire de Gladys doit être celui du Danemark (ou la même heure) :

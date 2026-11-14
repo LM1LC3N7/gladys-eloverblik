@@ -66,17 +66,15 @@ test('a POST with the bearer, the ids in the body only, the API version and a Us
 test('an oversized answer is cut before it is read whole (declared or streamed)', async (t) => {
   const big = await server(t, (req, res) => {
     res.writeHead(200, { 'content-type': 'application/json' });
-    // Streamed without a length: 64 KiB chunks, far beyond the bound.
+    // Streamed without a length: 3 MiB, then the connection stays open.
     const chunk = 'x'.repeat(64 * 1024);
-    let sent = 0;
-    const write = () => {
-      while (sent < 400 && res.write(chunk)) sent += 1;
-      if (sent < 400) res.once('drain', write);
-      else res.end();
-    };
-    write();
+    for (let i = 0; i < 48; i += 1) res.write(chunk);
   });
-  await assert.rejects(call(big.url, { maxBytes: 1024 * 1024 }), (err) => err.code === 'too_large');
+  // Cut at the bound: never the timeout of a body read whole.
+  await assert.rejects(
+    call(big.url, { maxBytes: 1024 * 1024, timeout: 3000 }),
+    (err) => err.code === 'too_large',
+  );
   const declared = await server(t, (req, res) => {
     res.writeHead(200, { 'content-length': String(50 * 1024 * 1024) });
     res.write('{');
@@ -87,11 +85,17 @@ test('an oversized answer is cut before it is read whole (declared or streamed)'
 test('a silent server times out; a redirect is never followed', async (t) => {
   const silent = await server(t, () => {});
   await assert.rejects(call(silent.url, { timeout: 200 }), (err) => err.code === 'timeout');
+  // The target of the redirect answers a valid 200: still never followed.
+  const target = await server(t, (req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end('{"result":[]}');
+  });
   const redirect = await server(t, (req, res) => {
-    res.writeHead(302, { location: 'http://127.0.0.1:1/elsewhere' });
+    res.writeHead(307, { location: `${target.url}/api/token` });
     res.end();
   });
   await assert.rejects(call(redirect.url), (err) => err.code === 'network');
+  assert.equal(target.requests.length, 0);
 });
 
 test('statuses: 429 with Retry-After, 503, 401, 403 of the API or of a proxy, 400 with its code', async (t) => {

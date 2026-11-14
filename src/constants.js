@@ -26,8 +26,8 @@ export const TIME_ZONE = 'Europe/Copenhagen';
 
 /** One request never takes longer (DataHub can be slow). */
 export const REQUEST_TIMEOUT = 60 * SECOND;
-/** A larger answer is cut before it is read whole (10 points x 92 days of hours is ~2.5 MB). */
-export const MAX_BODY_BYTES = 4 * 1024 * 1024;
+/** A larger answer is cut before it is read whole (10 points x 92 days of quarters is ~10 MB). */
+export const MAX_BODY_BYTES = 16 * 1024 * 1024;
 /** Two requests of the integration are always this far apart (one in flight at a time). */
 export const REQUEST_GAP = 2 * SECOND;
 

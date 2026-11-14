@@ -84,6 +84,18 @@ const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const ID_KEY = /^[0-9a-f]{64}$/;
 /** Errors that pause every request. */
 const PAUSING = new Set(['rate_limited', 'server']);
+/** Per metering point: asked before its registration (30018) or its authorization (30010). */
+const LATER_START = new Set(['E30018', 'E30010']);
+/** The aggregation refused (30008 unavailable, 30011 not valid). */
+const AGGREGATION_REFUSED = new Set([30008, 30011]);
+
+/** The local date halfway between two local dates (rounded up). */
+function midDate(from, to) {
+  const days = Math.round(
+    (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000,
+  );
+  return shiftDate(from, Math.ceil(days / 2));
+}
 
 /** 8 bits of a salted hash of the token: nothing to find it back from. */
 export const tagOf = (salt, token) =>
@@ -171,6 +183,8 @@ export class EloverblikApp {
     this.config = normalizeConfig({});
     this.session = undefined;
     this.token = undefined;
+    /** The token of the form last seen ('' when missing or malformed). */
+    this.enteredToken = undefined;
     /** The data access token: memory only, `{ token, at (monotonic) }`. */
     this.access = undefined;
 
@@ -205,6 +219,11 @@ export class EloverblikApp {
     this.lastReadAt = undefined;
     this.problems = new Map();
     this.roundProblem = undefined;
+    /** Per metering point key, in memory: the day it ended in error, the start DataHub took. */
+    this.errorDays = new Map();
+    this.floors = new Map();
+    /** `Quarter` first (the 15-minute meters); `Hour` once DataHub refuses it. */
+    this.aggregation = 'Quarter';
 
     this.roundTimer = null;
     this.configTimer = null;
@@ -270,14 +289,20 @@ export class EloverblikApp {
     this.stopped = false;
     const gen = ++this.gen;
     const config = normalizeConfig(rawConfig);
-    const tokenChanged = this.token !== undefined && config.token !== this.token;
-    // Another token entered by the user: read soon (not at a restart), and
-    // always tried, even when its 8-bit tag matches the refused one.
+    // Another token entered by the user (after a valid one or a malformed
+    // one): read soon (not at a restart), and always tried, even when its
+    // 8-bit tag matches the refused one.
+    const tokenChanged =
+      this.enteredToken !== undefined && config.token !== '' && config.token !== this.enteredToken;
+    this.enteredToken = config.token;
     if (tokenChanged) {
       this.soon = true;
-      if (this.refused) {
+      if (this.refused || this.data.refused) {
         this.refused = undefined;
         this.data.refused = null;
+        // Cleared on disk at once: a restart never brings the old refusal back.
+        await this.save();
+        if (this.gone(gen)) return;
       }
     }
     this.takeIdKey(rawConfig);
@@ -305,6 +330,8 @@ export class EloverblikApp {
         this.meters = [];
         this.listDate = undefined;
         this.problems.clear();
+        this.errorDays.clear();
+        this.floors.clear();
         this.roundProblem = undefined;
         this.roundOk = undefined;
         this.lastDiscovery = undefined;
@@ -649,6 +676,8 @@ export class EloverblikApp {
 
   /** Whether a created metering point still needs a day up to yesterday. */
   needs(key, today) {
+    // A metering point in error today (no data, relation, ...): tomorrow.
+    if (this.errorDays.get(key) === today) return false;
     const last = this.data.published[key];
     return !last || last < shiftDate(today, -1);
   }
@@ -803,9 +832,9 @@ export class EloverblikApp {
   static refusal(err) {
     if (err?.code === 'refused') return true;
     if (err?.code !== 'unauthorized') return false;
-    // 401: the API says the token does not meet its requirements; a 403 is
-    // one only when the API itself answered it (not a page of a proxy).
-    return err.status === 401 || Boolean(err.fromApi);
+    // A 401 or 403 is one only when the API itself answered it (its JSON
+    // ProblemDetails), never a page of a proxy or a gateway in front of it.
+    return Boolean(err.fromApi);
   }
 
   /** The metering points of the account: the list in memory, Discovery. */
@@ -819,6 +848,7 @@ export class EloverblikApp {
       key: keyOf(this.idKey, 'mp', p.id),
       suffix: p.id.slice(-4),
       supplier: p.supplier,
+      startDate: p.startDate,
     }));
     this.listInfo = { others: list.others, dropped: list.dropped };
     this.listDate = localDate(this.now());
@@ -860,8 +890,8 @@ export class EloverblikApp {
           await this.refuse();
           return;
         }
-        // A 403 page in front of GetToken: not a refusal, not a data route either.
-        if (err?.code === 'unauthorized') err.code = 'token_forbidden';
+        // A 401/403 page in front of GetToken: not a refusal, not a data route either.
+        if (err?.code === 'unauthorized') err.code = 'token_unauthorized_page';
         throw err;
       }
       await this.listMeters(gen);
@@ -897,12 +927,56 @@ export class EloverblikApp {
     }
   }
 
-  /** The window of a metering point: from the day after its mark (a few days re-read) to today. */
-  windowOf(key, today) {
-    const last = this.data.published[key];
+  /**
+   * The window of a metering point: from the day after its mark (a few days
+   * re-read) to today, never before the day it was taken over by the user
+   * (`consumerStartDate`) nor before a start that DataHub accepted for it.
+   */
+  windowOf(meter, today) {
+    const last = this.data.published[meter.key];
     let start = last ? shiftDate(last, 1 - REREAD_DAYS) : shiftDate(today, -FIRST_DAYS);
     if (start < shiftDate(today, -BACKFILL_DAYS)) start = shiftDate(today, -BACKFILL_DAYS);
+    if (meter.startDate && start < meter.startDate) start = meter.startDate;
+    const floor = this.floors.get(meter.key);
+    if (floor && start < floor) start = floor;
     return { start, end: today };
+  }
+
+  /** One gettimeseries request; falls back to `Hour` once when `Quarter` is refused. */
+  async seriesRequest(gen, meters, from, today) {
+    const ids = meters.map((m) => m.id);
+    for (let attempt = 0; ; attempt += 1) {
+      let body;
+      try {
+        body = await this.dataRequest(gen, routes.timeSeries(ids, from, today, this.aggregation));
+      } catch (err) {
+        if (
+          attempt === 0 &&
+          this.aggregation !== 'Hour' &&
+          codeOf(err) === 'invalid' &&
+          AGGREGATION_REFUSED.has(err.apiCode)
+        ) {
+          this.aggregation = 'Hour';
+          continue;
+        }
+        if (codeOf(err) === 'invalid') {
+          const code = err.apiCode ? `invalid_${err.apiCode}` : 'invalid';
+          for (const m of meters) this.problems.set(m.key, [code]);
+        }
+        throw err;
+      }
+      if (this.gone(gen)) throw new EloverblikError('stopped');
+      const series = parseTimeSeries(body, ids);
+      if (!series) throw new EloverblikError('bad_response');
+      const refusedAggregation = [...series.values()].some((r) =>
+        AGGREGATION_REFUSED.has(Number(r.problem?.slice(1))),
+      );
+      if (attempt === 0 && this.aggregation !== 'Hour' && refusedAggregation) {
+        this.aggregation = 'Hour';
+        continue;
+      }
+      return series;
+    }
   }
 
   /** One request for every created metering point still missing a day. */
@@ -911,38 +985,35 @@ export class EloverblikApp {
     const wanted = this.meters.filter((m) => created.has(m.key) && this.needs(m.key, today));
     for (const key of created) {
       if (!this.meters.some((m) => m.key === key)) this.problems.set(key, ['not_listed']);
-      else if (!this.needs(key, today)) this.problems.delete(key);
-    }
-    if (!wanted.length) return;
-    const windows = new Map(wanted.map((m) => [m.key, this.windowOf(m.key, today)]));
-    const from = [...windows.values()].map((w) => w.start).sort()[0];
-    if (from >= today) return;
-    let body;
-    try {
-      body = await this.dataRequest(
-        gen,
-        routes.timeSeries(
-          wanted.map((m) => m.id),
-          from,
-          today,
-        ),
-      );
-    } catch (err) {
-      if (codeOf(err) === 'invalid') {
-        const code = err.apiCode ? `invalid_${err.apiCode}` : 'invalid';
-        for (const m of wanted) this.problems.set(m.key, [code]);
+      else if (!this.needs(key, today) && this.errorDays.get(key) !== today) {
+        this.problems.delete(key);
       }
-      throw err;
     }
-    if (this.gone(gen)) throw new EloverblikError('stopped');
-    const series = parseTimeSeries(
-      body,
-      wanted.map((m) => m.id),
-    );
-    if (!series) throw new EloverblikError('bad_response');
-    for (const meter of wanted) {
+    const windows = new Map(wanted.map((m) => [m.key, this.windowOf(m, today)]));
+    const asked = wanted.filter((m) => windows.get(m.key).start < today);
+    if (!asked.length) return;
+    const from = asked.map((m) => windows.get(m.key).start).sort()[0];
+    const series = await this.seriesRequest(gen, asked, from, today);
+    for (const meter of asked) {
       if (this.gone(gen)) throw new EloverblikError('stopped');
-      await this.publishMeter(gen, meter, series.get(meter.id), windows.get(meter.key), today);
+      let window = windows.get(meter.key);
+      let result = series.get(meter.id);
+      // Asked before its registration in DataHub (30018) or before the
+      // authorization (30010): asked again alone, from a later day, halving
+      // the gap to yesterday each time (3 times at most in a read).
+      const yesterday = shiftDate(today, -1);
+      for (
+        let n = 0;
+        n < 3 && LATER_START.has(result?.problem) && window.start < yesterday;
+        n += 1
+      ) {
+        const start = midDate(window.start, yesterday);
+        window = { start, end: today };
+        const again = await this.seriesRequest(gen, [meter], start, today);
+        result = again.get(meter.id);
+        if (result && !result.problem) this.floors.set(meter.key, start);
+      }
+      await this.publishMeter(gen, meter, result, window, today);
     }
   }
 
@@ -996,9 +1067,12 @@ export class EloverblikApp {
       }
     }
     if (problems.length) {
+      // A metering point in error, or without data: read again tomorrow only.
+      this.errorDays.set(meter.key, today);
       this.problems.set(meter.key, problems.slice(0, 3));
       if (result?.problem) this.log.warn(`Metering point …${meter.suffix}: ${result.problem}`);
     } else {
+      this.errorDays.delete(meter.key);
       this.problems.delete(meter.key);
     }
   }
@@ -1202,6 +1276,9 @@ export class EloverblikApp {
       for (const lang of ['en', 'fr']) message[lang] += t(key, lang, values);
     };
     if (this.roundProblem) add('readProblem', { code: this.roundProblem });
+    // The end of the token first: the status is bounded, the meters come after.
+    const expiry = tokenExpiry(this.config.token);
+    if (expiry !== undefined) add('tokenUntil', { date: dmy(localDate(expiry)) });
     if (this.listDate !== undefined && !this.meters.length) add('noMeteringPoint');
     if (this.listInfo.dropped) add('tooManyMeteringPoints', { count: this.listInfo.dropped });
     if (this.meters.length && !created.length) add('createDevices');
@@ -1215,8 +1292,6 @@ export class EloverblikApp {
       });
     }
     if (this.devicesUnread) add('devicesUnread');
-    const expiry = tokenExpiry(this.config.token);
-    if (expiry !== undefined) add('tokenUntil', { date: dmy(localDate(expiry)) });
     return [
       this.lastReadAt === undefined || this.devicesUnread ? false : Boolean(this.roundOk),
       message,

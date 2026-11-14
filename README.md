@@ -8,8 +8,9 @@ reads the hourly consumption of each consumption metering point you create in
 Discovery and publishes it after the fact into the energy monitoring of Gladys
 (each hour in two half hours): Eloverblik serves the data one or two days late.
 
-**Read-only**, one read a day (4 at most while yesterday is incomplete), at
-most 30 requests a day. Never tested with a real Eloverblik account yet.
+**Read-only**, one read a day (4 scheduled reads at most while yesterday is
+incomplete, plus a read a minute after a new device, token or Test), at most
+30 requests a day. Never tested with a real Eloverblik account yet.
 
 Documentation: [English](docs/en.md) · [Français](docs/fr.md).
 

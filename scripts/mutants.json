@@ -26,8 +26,8 @@
   {
     "name": "a 403 page of a proxy taken as a refusal",
     "file": "src/app.js",
-    "from": "return err.status === 401 || Boolean(err.fromApi);",
-    "to": "return true;"
+    "from": "return Boolean(err.fromApi);",
+    "to": "return err.status === 403 || Boolean(err.fromApi);"
   },
   {
     "name": "a data 401 taken as a refusal",
@@ -128,8 +128,8 @@
   {
     "name": "a new token does not lift the refusal",
     "file": "src/app.js",
-    "from": "if (tokenChanged) {\n      this.soon = true;\n      if (this.refused) {",
-    "to": "if (tokenChanged) {\n      this.soon = true;\n      if (false) {"
+    "from": "      if (this.refused || this.data.refused) {\n        this.refused = undefined;",
+    "to": "      if (false) {\n        this.refused = undefined;"
   },
   {
     "name": "Test does not lift the refusal",
@@ -176,8 +176,8 @@
   {
     "name": "ids in the URL",
     "file": "src/eloverblik/client.js",
-    "from": "path: `/api/meterdata/gettimeseries/${from}/${to}/Hour`,",
-    "to": "path: `/api/meterdata/gettimeseries/${from}/${to}/Hour?ids=${ids.join(',')}`,"
+    "from": "path: `/api/meterdata/gettimeseries/${from}/${to}/${aggregation === 'Quarter' ? 'Quarter' : 'Hour'}`,",
+    "to": "path: `/api/meterdata/gettimeseries/${from}/${to}/${aggregation === 'Quarter' ? 'Quarter' : 'Hour'}?ids=${ids.join(',')}`,"
   },
   {
     "name": "hour not split in halves",
@@ -202,5 +202,179 @@
     "file": "src/eloverblik/model.js",
     "from": "if (mp.typeOfMP !== 'E17') {",
     "to": "if (false) {"
+  },
+  {
+    "name": "r1 R8 test button not limited to once a minute",
+    "file": "src/app.js",
+    "from": "mono - this.lastTest < TEST_MIN_GAP",
+    "to": "false"
+  },
+  {
+    "name": "r1 R11 request count not saved before it leaves",
+    "file": "src/app.js",
+    "from": "      this.data.lastToken = now;\n    }\n    // Kept before the request leaves (an unwritable /data is said in the status).\n    await this.save();",
+    "to": "      this.data.lastToken = now;\n    }\n"
+  },
+  {
+    "name": "r1 R12 GetToken time not kept in /data",
+    "file": "src/app.js",
+    "from": "this.data.lastToken = now;",
+    "to": ""
+  },
+  {
+    "name": "r1 R15 pause from /data not capped",
+    "file": "src/app.js",
+    "from": "Math.min(Math.max(0, pause.until - now), PAUSE_MAX)",
+    "to": "Math.max(0, pause.until - now)"
+  },
+  {
+    "name": "r1 R17 Retry-After not capped",
+    "file": "src/app.js",
+    "from": "Math.min(PAUSE_MAX, Math.max(PAUSE_MIN",
+    "to": "Math.min(Infinity, Math.max(PAUSE_MIN"
+  },
+  {
+    "name": "r1 R18 series of another metering point taken",
+    "file": "src/eloverblik/model.js",
+    "from": "if (typeof mrid === 'string' && mrid.trim() !== id) continue;",
+    "to": ""
+  },
+  {
+    "name": "r1 R20 unit not checked",
+    "file": "src/eloverblik/model.js",
+    "from": "typeof unit !== 'string' || unit.toUpperCase() !== 'KWH'",
+    "to": "false"
+  },
+  {
+    "name": "r1 R24 needs: read while yesterday complete",
+    "file": "src/app.js",
+    "from": "return !last || last < shiftDate(today, -1);",
+    "to": "return !last || last < today;"
+  },
+  {
+    "name": "r1 R25 no re-read of the last complete days",
+    "file": "src/app.js",
+    "from": "shiftDate(last, 1 - REREAD_DAYS)",
+    "to": "shiftDate(last, 1)"
+  },
+  {
+    "name": "r1 R26 no backfill cap",
+    "file": "src/app.js",
+    "from": "if (start < shiftDate(today, -BACKFILL_DAYS))",
+    "to": "if (false)"
+  },
+  {
+    "name": "r1 R28 first read of the day ignores the min gap",
+    "file": "src/app.js",
+    "from": "Math.max(wall(this.roundAt(today)), gap(MIN_ROUND_GAP))",
+    "to": "wall(this.roundAt(today))"
+  },
+  {
+    "name": "r1 R31 redirect followed",
+    "file": "src/eloverblik/client.js",
+    "from": "redirect: 'error'",
+    "to": "redirect: 'follow'"
+  },
+  {
+    "name": "r1 R34 long waits not cut",
+    "file": "src/app.js",
+    "from": "Math.min(wait, MAX_TIMER)",
+    "to": "wait"
+  },
+  {
+    "name": "r1 R39 new token keeps the old access token and list",
+    "file": "src/app.js",
+    "from": "if (tokenChanged || !this.session || config.problem)",
+    "to": "if (!this.session || config.problem)"
+  },
+  {
+    "name": "r1 R40 stop does not close the session",
+    "file": "src/app.js",
+    "from": "    this.devicesTimer = null;\n    this.session?.close();",
+    "to": "    this.devicesTimer = null;"
+  },
+  {
+    "name": "r1 R6 new token clears the refusal in memory only",
+    "file": "src/app.js",
+    "from": "        this.data.refused = null;\n        // Cleared on disk",
+    "to": "        // Cleared on disk"
+  },
+  {
+    "name": "r1 R51 a quarter seen twice counted twice",
+    "file": "src/eloverblik/model.js",
+    "from": "if (q.seen.has(at)) continue;",
+    "to": ""
+  },
+  {
+    "name": "r1 R52 every day 48 slots",
+    "file": "src/time.js",
+    "from": "for (let at = from; at < to; at += HALF_HOUR)",
+    "to": "for (let at = from; at < from + 48 * HALF_HOUR; at += HALF_HOUR)"
+  },
+  {
+    "name": "r1 R54 instant without a zone accepted",
+    "file": "src/eloverblik/model.js",
+    "from": "(Z|[+-]\\d{2}:?\\d{2})$/",
+    "to": "(Z|[+-]\\d{2}:?\\d{2})?$/"
+  },
+  {
+    "name": "r1 R55 5xx pause counts the round",
+    "file": "src/app.js",
+    "from": "if (this.data.roundsDate === today && this.data.rounds > 0) this.data.rounds -= 1;",
+    "to": ""
+  },
+  {
+    "name": "r1 R56 refusal from /data not loaded",
+    "file": "src/app.js",
+    "from": "if (refused && !this.refused) {",
+    "to": "if (false) {"
+  },
+  {
+    "name": "r1 R58 hole never given up",
+    "file": "src/app.js",
+    "from": "if (!complete && d >= shiftDate(today, -HOLE_WAIT_DAYS)) break;",
+    "to": "if (!complete) break;"
+  },
+  {
+    "name": "401 page of a proxy taken as a refusal",
+    "file": "src/app.js",
+    "from": "return Boolean(err.fromApi);",
+    "to": "return err.status === 401 || Boolean(err.fromApi);"
+  },
+  {
+    "name": "consumerStartDate ignored",
+    "file": "src/app.js",
+    "from": "if (meter.startDate && start < meter.startDate) start = meter.startDate;",
+    "to": ""
+  },
+  {
+    "name": "30018 not asked again later",
+    "file": "src/app.js",
+    "from": "const LATER_START = new Set(['E30018', 'E30010']);",
+    "to": "const LATER_START = new Set([]);"
+  },
+  {
+    "name": "a meter in error read again the same day",
+    "file": "src/app.js",
+    "from": "if (this.errorDays.get(key) === today) return false;",
+    "to": ""
+  },
+  {
+    "name": "no fallback to Hour",
+    "file": "src/app.js",
+    "from": "          this.aggregation = 'Hour';\n          continue;\n        }\n        if (codeOf(err) === 'invalid') {",
+    "to": "        }\n        if (codeOf(err) === 'invalid') {"
+  },
+  {
+    "name": "refusal not cleared on disk at once",
+    "file": "src/app.js",
+    "from": "        // Cleared on disk at once: a restart never brings the old refusal back.\n        await this.save();",
+    "to": ""
+  },
+  {
+    "name": "a token after a malformed one not new",
+    "file": "src/app.js",
+    "from": "this.enteredToken !== undefined && config.token !== '' && config.token !== this.enteredToken;",
+    "to": "this.token !== undefined && config.token !== this.token;"
   }
 ]

@@ -10,9 +10,10 @@
 //                             last 4 digits only.
 //
 // One feature: the 30-minute consumption, fed by publishEnergyConsumption
-// with the hours Eloverblik serves one or two days later (each hour in two
-// equal halves). Never an index (an index published a day late would pile a
-// whole day into one half hour), never publishStates.
+// with what Eloverblik serves one or two days later (two quarter hours
+// added, or each hour in two equal halves). Never an index (an index
+// published a day late would pile a whole day into one half hour), never
+// publishStates.
 // -----------------------------------------------------------------------------
 
 import {

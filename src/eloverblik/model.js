@@ -27,6 +27,7 @@ import {
   MAX_POINTS,
   MINUTE,
 } from '../constants.js';
+import { localDate, parseLocalDate } from '../time.js';
 
 /** 16 hex digits of an HMAC-SHA-256 under the id key: names a metering point, never its id. */
 export const keyOf = (idKey, kind, value) =>
@@ -59,6 +60,20 @@ export function parseToken(body) {
 }
 
 /**
+ * The local date (Denmark) of `consumerStartDate`, the day the user took the
+ * metering point over: the oldest day worth asking. Undefined when absent or
+ * unreadable (then nothing bounds the window but its own limits).
+ */
+function startDateOf(value) {
+  if (typeof value !== 'string' || value.length > 40) return undefined;
+  const text = value.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text))
+    return parseLocalDate(text) === undefined ? undefined : text;
+  const at = instant(text);
+  return at === undefined ? undefined : localDate(at);
+}
+
+/**
  * The consumption metering points (type E17) related to the user, at most
  * MAX_METERING_POINTS (sorted by id): `{ points: [{ id, supplier }],
  * others, dropped }`; undefined when unreadable.
@@ -84,7 +99,7 @@ export function parseMeteringPoints(body) {
             .trim()
             .slice(0, 60)
         : '';
-    if (!seen.has(id)) seen.set(id, { id, supplier });
+    if (!seen.has(id)) seen.set(id, { id, supplier, startDate: startDateOf(mp.consumerStartDate) });
   }
   const all = [...seen.values()].sort((a, b) => (a.id < b.id ? -1 : 1));
   return {

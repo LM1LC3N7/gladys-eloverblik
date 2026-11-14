@@ -21,8 +21,9 @@ export const CONFIG = { refresh_token: E.TOKEN, id_key: E.ID_KEY };
 export function routeOf(path) {
   if (path === '/customerapi/api/token') return { op: 'token' };
   if (path === '/customerapi/api/meteringpoints/meteringpoints') return { op: 'list' };
-  const m = /^\/customerapi\/api\/meterdata\/gettimeseries\/([\d-]+)\/([\d-]+)\/Hour$/.exec(path);
-  if (m) return { op: 'series', from: m[1], to: m[2] };
+  const m =
+    /^\/customerapi\/api\/meterdata\/gettimeseries\/([\d-]+)\/([\d-]+)\/(Hour|Quarter)$/.exec(path);
+  if (m) return { op: 'series', from: m[1], to: m[2], aggregation: m[3] };
   return { op: 'unknown' };
 }
 
@@ -58,6 +59,7 @@ export function createApi(answers = {}) {
       ids: body?.meteringPoints?.meteringPoint,
       auth: init.headers.Authorization,
       headers: init.headers,
+      signal: init.signal,
       at: api.clock.now,
     };
     api.calls.push(call);

@@ -24,8 +24,9 @@ export const NOW = Date.UTC(2026, 10, 11, 12, 30);
 
 export const token = (value = ACCESS) => ({ result: value });
 
-export function meteringPoints(ids = [MP], { production = [MP_PROD] } = {}) {
+export function meteringPoints(ids = [MP], { production = [MP_PROD], starts = {} } = {}) {
   const point = (id, type) => ({
+    ...(starts[id] ? { consumerStartDate: starts[id] } : {}),
     streetCode: '0001',
     streetName: 'Testvej',
     buildingNumber: '1',
