@@ -10,6 +10,8 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-14
+
 ### Added
 
 - First version: the Danish electricity meters read through the official
@@ -35,3 +37,6 @@ the notes of the version's GitHub Release.
   succeeds; the status shows the date the token ends.
 - A test button: a data access token and the list of the metering points.
 - The manifest declares `countries: ["DK"]` (Gladys 5.3.0 or later).
+
+[Unreleased]: https://github.com/LM1LC3N7/gladys-eloverblik/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/LM1LC3N7/gladys-eloverblik/releases/tag/v0.1.1

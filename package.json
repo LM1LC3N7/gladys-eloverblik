@@ -1,6 +1,6 @@
 {
   "name": "gladys-eloverblik",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Danish electricity meters for Gladys Assistant through the official Eloverblik customer API: the hourly consumption of each metering point, published after the fact into the energy monitoring. Read-only. Unofficial, not affiliated with Energinet.",
   "type": "module",
