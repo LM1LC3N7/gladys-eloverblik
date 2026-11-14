@@ -63,7 +63,8 @@ jeton d'accès et liste vos points (au plus une fois par minute).
   enregistrement (30018) ou avant l'autorisation (30010), ce point est
   le premier jour accepté de ce point est cherché seul, en coupant l'écart en
   deux jusqu'au jour près (aucun jour perdu), 8 requêtes au plus par lecture
-  pour tous les points ; une recherche coupée ne publie rien encore (statut `start_search`) et reprend à la lecture suivante.
+  pour tous les points (une de plus, une fois par démarrage, si DataHub refuse
+  les quarts d'heure pendant une recherche) ; une recherche coupée ne publie rien encore (statut `start_search`) et reprend à la lecture suivante.
   Chaque début distinct a sa propre requête : un point récent ne fait jamais
   échouer les autres. Après un arrêt,
   elle rattrape au plus 92 jours. Les 3 derniers jours complets sont relus avec

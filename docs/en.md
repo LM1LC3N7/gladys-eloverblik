@@ -60,7 +60,8 @@ access token and lists your points (at most once a minute).
   answers that the period starts before its registration (30018) or before
   the authorization (30010), that point's first accepted day is searched alone,
   by halves down to the day (no day lost), 8 requests at most per read for all
-  the points; a search cut there publishes nothing yet (status `start_search`) and goes on at the next read. Each distinct start
+  the points (one more, once per run, if DataHub refuses quarter hours during
+  a search); a search cut there publishes nothing yet (status `start_search`) and goes on at the next read. Each distinct start
   is asked in its own request, so a recent point never makes the others fail. After a stop, it catches up at
   most 92 days back. The last 3 complete days are read again with the next
   days: an estimated value replaced by a measured one is corrected.

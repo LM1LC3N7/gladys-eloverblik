@@ -446,7 +446,7 @@
   {
     "name": "a Gladys failure delays a day",
     "file": "src/app.js",
-    "from": "      if (!result || result.problem) this.errorDays.set(meter.key, today);",
+    "from": "      if (!result || result.problem) this.errorDays.set(meter.key, today);\n      else this.errorDays.delete(meter.key);",
     "to": "      this.errorDays.set(meter.key, today);"
   },
   {
@@ -454,5 +454,17 @@
     "file": "src/app.js",
     "from": "    if (best && done) {\n      this.floors.set(meter.key, hi);",
     "to": "    if (best) {\n      this.floors.set(meter.key, hi);"
+  },
+  {
+    "name": "r3 S10 search taken up: accepted start not asked again",
+    "file": "src/app.js",
+    "from": "if (!best && hi !== undefined && budget > 0) {",
+    "to": "if (false) {"
+  },
+  {
+    "name": "r3 S12 search state lost on an error",
+    "file": "src/app.js",
+    "from": "        this.searches.set(meter.key, { lo, hi });\n        throw err;",
+    "to": "        throw err;"
   }
 ]

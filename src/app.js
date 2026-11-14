@@ -1074,8 +1074,13 @@ export class EloverblikApp {
       else best = { result, window: { start: hi, end: today } };
     }
     const done = hi !== undefined && midDate(lo, hi) >= hi;
-    if (done || (!best && budget > 0)) this.searches.delete(meter.key);
-    else this.searches.set(meter.key, { lo, hi });
+    // Kept until something is published (a search converged without an
+    // answer in hand asks `hi` again at the next read).
+    if ((best && done) || (!best && hi === undefined && budget > 0)) {
+      this.searches.delete(meter.key);
+    } else {
+      this.searches.set(meter.key, { lo, hi });
+    }
     if (best && done) {
       this.floors.set(meter.key, hi);
       await this.publishMeter(gen, meter, best.result, best.window, today);

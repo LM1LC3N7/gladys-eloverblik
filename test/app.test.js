@@ -908,3 +908,45 @@ test('an error while searching: the points already answered are published', asyn
   assert.equal(env.store.data.published[KEY], '2026-11-10');
   assert.match(statusText(env), /slow down/);
 });
+
+test('a search taken up with its accepted start known asks that start once and publishes', async (t) => {
+  const api = registered({ [E.MP2]: '2026-11-05' });
+  const env = await started({ api });
+  t.after(() => env.app.stop());
+  // As left by a read whose budget ran out once the search had converged.
+  env.app.searches.set(KEY2, { lo: '2026-11-04', hi: '2026-11-05' });
+  await createAll(env);
+  await env.wait(2 * MINUTE);
+  const series = env.api.calls.filter((c) => c.op === 'series');
+  assert.deepEqual(
+    series.slice(1).map((c) => [c.from, c.ids]),
+    [['2026-11-05', [E.MP2]]],
+  );
+  assert.equal(firstSlot(env, KEY2), parseLocalDate('2026-11-05'));
+});
+
+test('a search cut by an error goes on where it stopped at the next read', async (t) => {
+  let searches = 0;
+  const base = registered({ [E.MP2]: '2026-11-05' });
+  const api = createApi({
+    list: base.answers.list,
+    series: (call, now) => {
+      if (call.ids.length === 1 && ++searches === 2) return json({}, 503);
+      return base.answers.series(call, now);
+    },
+  });
+  const env = await ready({ api });
+  t.after(() => env.app.stop());
+  await env.wait(DAY);
+  // The searches (the window request of the second read is from 2026-10-11).
+  const alone = env.api.calls.filter(
+    (c) => c.op === 'series' && c.ids.length === 1 && c.from !== '2026-10-11',
+  );
+  // 2 before the error, then 4 from where it stopped (a fresh search takes 5).
+  assert.equal(
+    alone.length,
+    6,
+    alone.map((c) => c.from + '@' + Math.round((c.at - E.NOW) / 60000)).join(),
+  );
+  assert.equal(firstSlot(env, KEY2), parseLocalDate('2026-11-05'));
+});
